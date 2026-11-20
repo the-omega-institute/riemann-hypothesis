@@ -1,5 +1,39 @@
 # riemann-hypothesis
 
+## Reusing the compiled proof
+
+This fork publishes Linux x86-64 Lake build products in GitHub Releases. The
+`Lean release build` workflow walks the local imports reachable from `Main`.
+Each shard key includes its source blobs, all prerequisite shard keys, the Lake
+configuration, the pinned toolchain and the package manifest. Successful shards
+survive new workflows and expiration of the Actions cache.
+
+On Linux x86-64, check out the desired commit, install its pinned Lean
+toolchain, and run these commands with GitHub CLI, Python 3.12+, curl and zstd:
+
+```sh
+lake exe cache get
+python3 ci/parts.py restore Main
+```
+
+You can replace `Main` with any released module, for example `Statements`.
+The command selects its import closure, verifies GitHub's SHA-256 for each
+downloaded archive and finishes with `lake --no-build build`. Downloads are
+reusable before the entire proof has built. The `lean-parts-v1-*` prereleases
+hold compiled parts. A final `build-<commit>` release includes the dependency
+plan, the checksums and URLs of all parts, and the axiom report for the five
+statements. The final job imports the compiled `Main` on a fresh runner.
+
+Start or resume the default branch build with
+`gh workflow run lean-parts.yml -R the-omega-institute/riemann-hypothesis`.
+It checks Releases first and compiles only missing shards. The first shard
+contains the shared bootstrap modules. Once it is published, ready shards run
+in parallel. Failed siblings can be retried by dispatching the workflow again.
+The default runner is Ubuntu 24.04 x86-64. The repository variable
+`RH_LINUX_RUNNER` can select a Linux x86-64 runner with more memory or disk.
+
+## Upstream verification project
+
 [![checks](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml)
 
 A [Comparator](https://github.com/leanprover/comparator) setup for the Lean formalization
