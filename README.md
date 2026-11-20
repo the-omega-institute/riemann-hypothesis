@@ -2,6 +2,12 @@
 
 Levent Alpöge released Lean source for a claimed proof of the Riemann hypothesis and GRH for Dirichlet L-functions. **The Omega Institute builds and distributes that source in reusable pieces so others can check it on their own machines.** Deicyde mirrored the original archive and supplied the independent Comparator challenge. The proof declarations are in `src/Main.lean`. [Author’s announcement](https://alpo.ge/remark.pdf) · [Upstream verification project](https://github.com/Deicyde/riemann-hypothesis) · [Main.lean](src/Main.lean)
 
+## Companion book
+
+The Omega Institute’s *Symmetry on the Critical Line: How the Riemann Hypothesis Is Proved* is a bilingual guide to Alpöge’s Lean formalization. The English edition follows the argument from symmetry about the critical line to Dirichlet L-functions, with worked examples and interactive figures. Its final chapter explains how to trace a theorem to its Lean declaration and what an independent kernel replay checks.
+
+[Read the English edition](https://rh.trureturing.org/riemann-hypothesis/en/) · [Book source on GitHub](https://github.com/the-omega-institute/riemann-hypothesis-book)
+
 ## Verify locally
 
 Use x86-64 Linux with Git, Python 3.12 or later, curl, zstd, and elan with its `lake` command on your PATH. Elan selects the pinned Lean 4.33.1 toolchain. Public Release downloads work without a GitHub account. The coverage command also works on macOS. [Install elan](https://lean-lang.org/install/)
