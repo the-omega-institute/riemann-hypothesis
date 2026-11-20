@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tarfile
+import time
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
@@ -39,8 +40,28 @@ def asset_name(key):
     return key + ".tar.zst"
 
 
+def transient_error(message):
+    return any(marker in message.lower() for marker in (
+        "http 429", "http 500", "http 502", "http 503", "http 504", "connection reset",
+        "connection refused", "connection timed out", "tls handshake timeout", "unexpected eof",
+        "secondary rate limit",
+    ))
+
+
+def github_read(*args):
+    for delay in (2, 5, 15, 30, 0):
+        result = subprocess.run(["gh", *args], capture_output=True, text=True)
+        if not result.returncode:
+            return result.stdout.strip()
+        message = result.stderr.strip()
+        if not delay or not transient_error(message):
+            raise RuntimeError(message)
+        print(f"GitHub read failed ({message}), retrying in {delay}s", flush=True)
+        time.sleep(delay)
+
+
 def api_pages(endpoint):
-    return json.loads(output("gh", "api", "--paginate", "--slurp", endpoint))
+    return json.loads(github_read("api", "--paginate", "--slurp", endpoint))
 
 
 def inventory(repo, pages_for=api_pages):
@@ -199,19 +220,42 @@ def audit(report_path=Path("axioms.txt")):
 def upload(repo, key, path):
     tag = bucket(key)
     # Create only a bucket that actually has a completed part. Concurrent creators converge.
-    if subprocess.run(["gh", "release", "view", tag, "-R", repo], stdout=subprocess.DEVNULL,
-                      stderr=subprocess.DEVNULL).returncode:
-        result = subprocess.run(["gh", "release", "create", tag, "-R", repo, "--target",
-                                 os.environ.get("BUILD_SOURCE_SHA") or output("git", "rev-parse", "HEAD"), "--prerelease", "--latest=false",
-                                 "--title", tag, "--notes", "Reusable compiled Lake shards for Linux x86-64."])
-        if result.returncode:
-            run("gh", "release", "view", tag, "-R", repo)
-    release_id = output("gh", "api", f"repos/{repo}/releases/tags/{tag}", "--jq", ".id")
-    url = f"https://uploads.github.com/repos/{repo}/releases/{release_id}/assets?name={path.name}"
-    actual = output("gh", "api", "--method", "POST", "-H", "Content-Type: application/octet-stream",
-                    "--input", str(path), url, "--jq", ".digest")
-    if actual != "sha256:" + sha256(path):
-        raise RuntimeError("uploaded asset digest mismatch")
+    endpoint = f"repos/{repo}/releases/tags/{tag}"
+    try:
+        release_id = github_read("api", endpoint, "--jq", ".id")
+    except RuntimeError as exc:
+        if "HTTP 404" not in str(exc):
+            raise
+        source = os.environ.get("BUILD_SOURCE_SHA") or output("git", "rev-parse", "HEAD")
+        subprocess.run(["gh", "release", "create", tag, "-R", repo, "--target", source,
+                        "--prerelease", "--latest=false", "--title", tag,
+                        "--notes", "Reusable compiled Lake shards for Linux x86-64."])
+        release_id = github_read("api", endpoint, "--jq", ".id")
+    assets = f"repos/{repo}/releases/{release_id}/assets"
+    url = f"https://uploads.github.com/{assets}?name={path.name}"
+    expected = "sha256:" + sha256(path)
+    for delay in (2, 5, 15, 30, 0):
+        post = subprocess.run(["gh", "api", "--method", "POST", "-H", "Content-Type: application/octet-stream",
+                               "--input", str(path), url, "--jq", ".digest"], capture_output=True, text=True)
+        if not post.returncode:
+            if post.stdout.strip() != expected:
+                raise RuntimeError(f"Uploaded digest mismatch for {path.name}")
+            return
+        if not transient_error(post.stderr) and "HTTP 422" not in post.stderr:
+            raise RuntimeError(post.stderr)
+        # The server may have accepted the bytes before the connection failed.
+        remote = next((a for page in api_pages(assets + "?per_page=100") for a in page
+                       if a["name"] == path.name), None)
+        if remote and remote["state"] == "uploaded":
+            if remote["digest"] != expected:
+                raise RuntimeError(f"Existing Release digest mismatch for {path.name}")
+            return
+        if remote and remote["state"] == "starter" and remote["size"] == 0:
+            run("gh", "api", "--method", "DELETE", f'repos/{repo}/releases/assets/{remote["id"]}')
+        if not delay:
+            raise RuntimeError(post.stderr)
+        print(f"Upload interrupted, retrying {path.name} in {delay}s", flush=True)
+        time.sleep(delay)
 
 
 

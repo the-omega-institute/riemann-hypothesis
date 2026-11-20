@@ -21,7 +21,7 @@ jobs:
         env: {KEY: '${{ inputs.key }}'}
         run: |
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/lean-parts-v1-${KEY:0:1}/$KEY.tar.zst"
-          status=$(curl -sSIL --retry 4 -o /dev/null -w '%{http_code}' "$url")
+          status=$(curl -sSIL --retry 4 --retry-all-errors --retry-max-time 180 -o /dev/null -w '%{http_code}' "$url")
           case "$status" in
             200) echo 'hit=true' >> "$GITHUB_OUTPUT" ;;
             404) echo 'hit=false' >> "$GITHUB_OUTPUT" ;;

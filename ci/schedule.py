@@ -5,14 +5,13 @@ import os
 import re
 import time
 
-from parts import INDEX, asset_name, inventory, output, prepare, run
+from parts import INDEX, api_pages, asset_name, inventory, prepare, run
 
 BATCH = 28  # Run title fits GitHub's display limit, including all shard numbers.
 
 
 def batches(repo, head):
-    pages = json.loads(output("gh", "api", "--paginate", "--slurp",
-                              f"repos/{repo}/actions/workflows/shard-batch.yml/runs?branch=main&per_page=100"))
+    pages = api_pages(f"repos/{repo}/actions/workflows/shard-batch.yml/runs?branch=main&per_page=100")
     rows = []
     for page in pages:
         for r in page["workflow_runs"]:
