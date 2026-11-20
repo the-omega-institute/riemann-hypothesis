@@ -12,7 +12,15 @@ runs:
         echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
     - name: Install pinned Lean
       shell: bash
-      run: lean --version
+      run: |
+        for delay in 5 15 30; do
+          if lean --version; then
+            exit 0
+          fi
+          echo "Retrying the pinned Lean toolchain download in ${delay}s" >&2
+          sleep "$delay"
+        done
+        lean --version
     - name: Restore dependency builds
       uses: actions/cache@v4
       id: mathlib
