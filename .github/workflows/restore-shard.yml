@@ -1,0 +1,24 @@
+name: Check a released module
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: Lean module to restore from published shards
+        type: string
+        required: true
+        default: Statements
+permissions: {contents: read}
+jobs:
+  restore:
+    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/toolchain
+      - name: Download from Release and require zero proof compilations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.module }}
+          LEAN_NUM_THREADS: '3'
+        run: python3 ci/parts.py restore "$TARGET"
