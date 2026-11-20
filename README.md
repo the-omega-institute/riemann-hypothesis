@@ -41,6 +41,10 @@ before toolchain installation let overlapping runs reuse completed work.
 The coordinator retries missing parts, rolls over before the hosted job time
 limit and reconstructs progress from Releases and active Actions batches.
 A new manual dispatch resumes after an interrupted coordinator.
+Actions caches elan and the pinned Lean toolchain by operating system,
+architecture, and the contents of `lean-toolchain`. A cold runner saves
+the installation as soon as `lean --version` succeeds. Mathlib has a
+separate cache keyed by the toolchain and package manifest.
 The default runner is Ubuntu 24.04 x86-64. The repository variable
 `RH_LINUX_RUNNER` can select a Linux x86-64 runner with more memory or disk.
 
