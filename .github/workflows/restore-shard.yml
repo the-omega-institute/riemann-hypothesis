@@ -16,9 +16,12 @@ jobs:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
       - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
-        run: ./verify "$TARGET"
+      - name: Measure available space for the final Main restore
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          df -hT "$PWD" /mnt
+          free -h
+          swapon --show
+          command -v mkfs.btrfs || true
+          du -sh /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache 2>/dev/null || true
+          python3 ci/measure_capacity.py
