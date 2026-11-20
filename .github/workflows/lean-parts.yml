@@ -1,6 +1,8 @@
 name: Lean release build
 on:
   workflow_dispatch:
+    inputs:
+      session: {type: string, required: false}
   push:
     branches: [main]
     paths: ['ci/**', '.github/workflows/lean-parts.yml', '.github/actions/toolchain/**', 'src/**', 'lakefile.toml', 'lake-manifest.json', 'lean-toolchain']
@@ -13,73 +15,21 @@ jobs:
   plan:
     if: github.repository == 'the-omega-institute/riemann-hypothesis' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    permissions: {actions: write, contents: read}
     outputs:
-      ready: ${{ steps.plan.outputs.ready }}
-      complete: ${{ steps.plan.outputs.complete }}
+      complete: ${{ steps.dispatch.outputs.complete }}
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
-      - id: plan
-        env: {GH_TOKEN: '${{ github.token }}'}
-        run: python3 ci/parts.py prepare
-      - uses: actions/upload-artifact@v4
-        with:
-          name: plan
-          path: .lake/parts/
-          include-hidden-files: true
-          retention-days: 3
-
-  compile:
-    needs: plan
-    if: needs.plan.outputs.ready != '[]'
-    strategy:
-      fail-fast: false
-      max-parallel: 16
-      matrix:
-        part: ${{ fromJSON(needs.plan.outputs.ready) }}
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 350
-    steps:
-      - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: actions/download-artifact@v4
-        with: {name: plan, path: .lake/parts}
-      - uses: ./.github/actions/toolchain
-      - name: Restore prerequisite modules and compile shard
-        env: {PART: '${{ matrix.part }}', LEAN_NUM_THREADS: '3'}
-        run: python3 ci/parts.py build "$PART"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: part-${{ matrix.part }}
-          path: '*.tar.zst'
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 2
-
-  checkpoint:
-    if: always() && needs.plan.result == 'success' && needs.plan.outputs.ready != '[]'
-    needs: [plan, compile]
-    runs-on: ubuntu-24.04
-    permissions: {contents: write, actions: read}
-    steps:
-      - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: actions/download-artifact@v4
-        with: {name: plan, path: .lake/parts}
-      - name: Publish each successful shard even when siblings fail
+      - id: dispatch
         env:
           GH_TOKEN: ${{ github.token }}
-          READY: ${{ needs.plan.outputs.ready }}
-        run: |
-          python3 ci/checkpoint.py
-
-  continue:
-    needs: [checkpoint, compile]
-    runs-on: ubuntu-24.04
-    permissions: {actions: write}
-    steps:
-      - env: {GH_TOKEN: '${{ github.token }}'}
-        run: gh workflow run lean-parts.yml -R "$GITHUB_REPOSITORY" --ref main
+          BUILD_SESSION: ${{ inputs.session }}
+        run: python3 ci/schedule.py
+      - uses: actions/upload-artifact@v4
+        if: steps.dispatch.outputs.complete == 'true'
+        with: {name: plan, path: .lake/parts/, include-hidden-files: true, retention-days: 2}
 
   release:
     if: needs.plan.outputs.complete == 'true'

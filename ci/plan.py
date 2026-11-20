@@ -5,7 +5,7 @@ import hashlib
 import json
 import subprocess
 import sys
-from pathlib import Path
+from planning import split_graph
 
 MAX_MODULES = 400
 MAX_BYTES = 2_500_000
@@ -50,33 +50,31 @@ def plan():
     visit("Main")
     config = digest([git("rev-parse", "HEAD:" + p).decode().strip() for p in
                      ["lean-toolchain", "lake-manifest.json", "lakefile.toml"]] + ["lake-leanArts/linux-x86_64/v1"])
-    owner, stages, shards = {}, collections.defaultdict(list), []
-    # Shared, dependency-free project roots form an inexpensive initial restore target.
+    # Reconstruct the original sixteen foundation shards and bootstrap so releases
+    # made by the first scheduler retain exactly the same content addresses.
     bootstrap = sorted(m for m in height if not deps[m] and (m == "Statements" or m.startswith("BuildAid.")))
-    if bootstrap:
-        shards.append({"stage": 0, "bytes": sum(files[m][1] for m in bootstrap), "modules": bootstrap, "deps": set()})
-        owner.update(dict.fromkeys(bootstrap, 0))
+    foundations = [{"stage": 0, "bytes": sum(files[m][1] for m in bootstrap), "modules": bootstrap, "deps": set()}]
+    owner = dict.fromkeys(bootstrap, 0)
     for mod in sorted(height.keys() - owner.keys(), key=lambda m: (height[m], m)):
         size = files[mod][1]
-        parents = {owner[d] for d in deps[mod]}
-        stage = max((shards[p]["stage"] for p in parents), default=0)
-        here = [p for p in parents if shards[p]["stage"] == stage]
-        def room(i):
-            return len(shards[i]["modules"]) < MAX_MODULES and shards[i]["bytes"] + size <= MAX_BYTES
-        if len(here) == 1 and here[0] != 0 and room(here[0]):
-            i = here[0]
+        parents = {owner.get(d) for d in deps[mod]}
+        if parents:
+            if len(parents) != 1 or None in parents or 0 in parents:
+                continue
+            i = next(iter(parents))
         else:
-            stage += bool(here)
-            candidates = stages[stage]
-            if not candidates or not room(candidates[-1]):
-                candidates.append(len(shards))
-                shards.append({"stage": stage, "bytes": 0, "modules": [], "deps": set()})
-            i = candidates[-1]
-        shard = shards[i]
+            i = len(foundations) - 1
+        shard = foundations[i]
+        if i == 0 or len(shard["modules"]) >= MAX_MODULES or shard["bytes"] + size > MAX_BYTES:
+            if parents:
+                continue
+            i = len(foundations)
+            shard = {"stage": 0, "bytes": 0, "modules": [], "deps": set()}
+            foundations.append(shard)
         shard["modules"].append(mod)
         shard["bytes"] += size
-        shard["deps"].update(parents - {i})
         owner[mod] = i
+    shards, owner = split_graph(files, deps, height, foundations)
     for i in sorted(range(len(shards)), key=lambda i: shards[i]["stage"]):
         shard = shards[i]
         assert all(shards[d]["stage"] < shard["stage"] for d in shard["deps"])
