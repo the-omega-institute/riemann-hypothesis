@@ -20,7 +20,7 @@ jobs:
       - name: Download the archive from alpo.ge and compare
         run: |
           T="$RUNNER_TEMP/dl"; mkdir "$T"
-          for i in $(seq -w 1 14); do curl -fsSL --retry 3 -o "$T/part$i" "https://alpo.ge/lean.tar.gz.part$i"; done
+          for i in $(seq -w 1 14); do curl -fsSL --retry 3 --retry-all-errors --retry-max-time 240 -o "$T/part$i" "https://alpo.ge/lean.tar.gz.part$i"; done
           cat "$T"/part* > "$T/lean.tar.gz"
           echo "9631b4f020199e580ba86178cb56c6e9b09f690c2369a80dc4334aa93f49c7fc  $T/lean.tar.gz" | sha256sum -c
           tar xzf "$T/lean.tar.gz" -C "$T"
