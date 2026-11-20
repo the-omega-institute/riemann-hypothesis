@@ -7,7 +7,7 @@ on:
         type: string
         required: true
         default: BuildAid.D1
-permissions: {contents: read}
+permissions: {contents: read, actions: read}
 jobs:
   restore:
     runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}

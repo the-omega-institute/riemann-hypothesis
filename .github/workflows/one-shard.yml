@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 350
-    permissions: {contents: read}
+    permissions: {contents: read, actions: read}
     outputs:
       compiled: ${{ steps.build.outputs.compiled }}
     steps:
@@ -37,7 +37,7 @@ jobs:
         if: steps.lookup.outputs.hit == 'false'
       - id: build
         if: steps.lookup.outputs.hit == 'false'
-        env: {PART: '${{ inputs.number }}', LEAN_NUM_THREADS: '3'}
+        env: {PART: '${{ inputs.number }}', LEAN_NUM_THREADS: '3', GH_TOKEN: '${{ github.token }}'}
         run: |
           python3 ci/parts.py build "$PART"
           echo 'compiled=true' >> "$GITHUB_OUTPUT"

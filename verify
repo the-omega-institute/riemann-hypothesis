@@ -77,7 +77,7 @@ def main():
     run("lake", "--version")
     run("lake", "exe", "cache", "get")
     STATE.mkdir(parents=True, exist_ok=True)
-    restore({"shards": available}, index, modules, source[1])
+    restore(data, index, modules, source[1], allow_missing=args.build_missing)
     if len(available) < len(shards):
         lake(modules)
     lake(modules, reuse=True)
