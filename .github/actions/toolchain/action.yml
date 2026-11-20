@@ -1,0 +1,25 @@
+name: Pinned Lean and Mathlib
+description: Install the repository toolchain and restore Mathlib binaries
+runs:
+  using: composite
+  steps:
+    - name: Install elan
+      shell: bash
+      run: |
+        if ! command -v elan >/dev/null; then
+          curl --fail --silent --show-error --location --retry 3 https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
+        fi
+        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+    - name: Install pinned Lean
+      shell: bash
+      run: lean --version
+    - name: Restore dependency builds
+      uses: actions/cache@v4
+      id: mathlib
+      with:
+        path: .lake/packages
+        key: rh-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
+    - name: Get official Mathlib binaries
+      if: steps.mathlib.outputs.cache-hit != 'true'
+      shell: bash
+      run: lake exe cache get

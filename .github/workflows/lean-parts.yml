@@ -1,0 +1,122 @@
+name: Lean release build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ci/**', '.github/workflows/lean-parts.yml', '.github/actions/toolchain/**', 'src/**', 'lakefile.toml', 'lake-manifest.json', 'lean-toolchain']
+permissions:
+  contents: read
+concurrency:
+  group: lean-release-build
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.repository == 'the-omega-institute/riemann-hypothesis' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      ready: ${{ steps.plan.outputs.ready }}
+      complete: ${{ steps.plan.outputs.complete }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - id: plan
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: python3 ci/parts.py prepare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: .lake/parts/
+          include-hidden-files: true
+          retention-days: 3
+
+  compile:
+    needs: plan
+    if: needs.plan.outputs.ready != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        part: ${{ fromJSON(needs.plan.outputs.ready) }}
+    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: plan, path: .lake/parts}
+      - uses: ./.github/actions/toolchain
+      - name: Restore prerequisite modules and compile shard
+        env: {PART: '${{ matrix.part }}', LEAN_NUM_THREADS: '3'}
+        run: python3 ci/parts.py build "$PART"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: part-${{ matrix.part }}
+          path: '*.tar.zst'
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 2
+
+  checkpoint:
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.ready != '[]'
+    needs: [plan, compile]
+    runs-on: ubuntu-24.04
+    permissions: {contents: write, actions: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: plan, path: .lake/parts}
+      - name: Publish each successful shard even when siblings fail
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READY: ${{ needs.plan.outputs.ready }}
+        run: |
+          python3 ci/checkpoint.py
+
+  continue:
+    needs: [checkpoint, compile]
+    runs-on: ubuntu-24.04
+    permissions: {actions: write}
+    steps:
+      - env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh workflow run lean-parts.yml -R "$GITHUB_REPOSITORY" --ref main
+
+  release:
+    if: needs.plan.outputs.complete == 'true'
+    needs: plan
+    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: plan, path: .lake/parts}
+      - uses: ./.github/actions/toolchain
+      - name: Restore Main on a clean runner and audit five theorems
+        run: python3 ci/parts.py finalize
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-manifest
+          include-hidden-files: true
+          path: |
+            .lake/parts/plan.json.gz
+            release.json
+            axioms.txt
+  publish:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions: {contents: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: verified-manifest}
+      - name: Publish the complete build
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          tag="build-$GITHUB_SHA"
+          if ! gh release view "$tag" -R "$GITHUB_REPOSITORY"; then
+            gh release create "$tag" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "Compiled Main at ${GITHUB_SHA:0:12}" --notes "Linux x86-64 Lake outputs, dependency manifest and axiom report for all five statements."
+          fi
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -qx true; then
+            gh release upload "$tag" -R "$GITHUB_REPOSITORY" release.json axioms.txt .lake/parts/plan.json.gz --clobber
+            gh release edit "$tag" -R "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
