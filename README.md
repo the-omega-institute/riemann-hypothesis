@@ -26,9 +26,17 @@ statements. The final job imports the compiled `Main` on a fresh runner.
 
 Start or resume the default branch build with
 `gh workflow run lean-parts.yml -R the-omega-institute/riemann-hypothesis`.
-It checks Releases first and compiles only missing shards. The first shard
-contains the shared bootstrap modules. Once it is published, ready shards run
-in parallel. Failed siblings can be retried by dispatching the workflow again.
+The scheduler discovers ready work from the published dependency hashes once a
+minute and dispatches it across independent Actions matrices. Each completed
+shard publishes immediately. The first 17 compilation keys are retained from
+the initial run. On this source tree there are 8,490 shards, 36 dependency
+levels and 529 independently eligible jobs immediately after the foundations.
+GitHub allocates the available runners. Longer remaining paths to Main are
+dispatched first. A single active workflow per shard hash and a Release lookup
+before toolchain installation let overlapping runs reuse completed work.
+The coordinator retries missing parts, rolls over before the hosted job time
+limit and reconstructs progress from Releases and active Actions batches.
+A new manual dispatch resumes after an interrupted coordinator.
 The default runner is Ubuntu 24.04 x86-64. The repository variable
 `RH_LINUX_RUNNER` can select a Linux x86-64 runner with more memory or disk.
 

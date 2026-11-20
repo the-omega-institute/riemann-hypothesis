@@ -1,0 +1,64 @@
+name: Build and publish one shard
+on:
+  workflow_call:
+    inputs:
+      source: {type: string, required: true}
+      number: {type: number, required: true}
+      key: {type: string, required: true}
+concurrency:
+  group: lean-shard-${{ inputs.key }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 350
+    permissions: {contents: read}
+    outputs:
+      compiled: ${{ steps.build.outputs.compiled }}
+    steps:
+      - id: lookup
+        name: Check the immutable Release address before starting a runner build
+        env: {KEY: '${{ inputs.key }}'}
+        run: |
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/lean-parts-v1-${KEY:0:1}/$KEY.tar.zst"
+          status=$(curl -sSIL --retry 4 -o /dev/null -w '%{http_code}' "$url")
+          case "$status" in
+            200) echo 'hit=true' >> "$GITHUB_OUTPUT" ;;
+            404) echo 'hit=false' >> "$GITHUB_OUTPUT" ;;
+            *) echo "Release lookup returned $status" >&2; exit 1 ;;
+          esac
+      - uses: actions/checkout@v4
+        if: steps.lookup.outputs.hit == 'false'
+        with: {ref: '${{ inputs.source }}', persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        if: steps.lookup.outputs.hit == 'false'
+        with: {name: plan, path: .lake/parts}
+      - uses: ./.github/actions/toolchain
+        if: steps.lookup.outputs.hit == 'false'
+      - id: build
+        if: steps.lookup.outputs.hit == 'false'
+        env: {PART: '${{ inputs.number }}', LEAN_NUM_THREADS: '3'}
+        run: |
+          python3 ci/parts.py build "$PART"
+          echo 'compiled=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.build.outputs.compiled == 'true'
+        with:
+          name: part-${{ inputs.number }}
+          path: '${{ inputs.key }}.tar.zst'
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: build
+    if: needs.build.outputs.compiled == 'true'
+    runs-on: ubuntu-24.04
+    permissions: {contents: write, actions: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {sparse-checkout: ci, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: 'part-${{ inputs.number }}', path: .}
+      - name: Commit this shard to Releases
+        env: {GH_TOKEN: '${{ github.token }}', KEY: '${{ inputs.key }}', SOURCE: '${{ inputs.source }}'}
+        run: python3 ci/parts.py publish "$KEY" "$SOURCE"

@@ -1,0 +1,38 @@
+name: Compile ready shards
+run-name: Parts ${{ inputs.source }} ${{ inputs.session }} ${{ inputs.parts }}
+on:
+  workflow_dispatch:
+    inputs:
+      source: {type: string, required: true}
+      session: {type: string, required: true}
+      parts: {type: string, required: true}
+permissions: {contents: read}
+jobs:
+  plan:
+    if: github.repository == 'the-omega-institute/riemann-hypothesis' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ inputs.source }}', persist-credentials: false}
+      - id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PART_IDS: ${{ inputs.parts }}
+        run: python3 ci/parts.py select
+      - uses: actions/upload-artifact@v4
+        with: {name: plan, path: .lake/parts/, include-hidden-files: true, retention-days: 1}
+  shard:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    permissions: {contents: write, actions: read}
+    uses: ./.github/workflows/one-shard.yml
+    with:
+      source: ${{ inputs.source }}
+      number: ${{ matrix.part.number }}
+      key: ${{ matrix.part.key }}

@@ -45,13 +45,16 @@ def inventory(repo):
                               f"repos/{repo}/releases?per_page=100"))
     releases = [r for page in pages for r in page if r["tag_name"].startswith("lean-parts-v1-")]
     def assets(release):
-        url = f'repos/{repo}/releases/{release["id"]}/assets?per_page=100'
-        pages = json.loads(output("gh", "api", "--paginate", "--slurp", url))
+        entries = release["assets"]
+        # Fall back to the paginated endpoint at common nested-collection limits.
+        if len(entries) in {30, 100, 1000}:
+            url = f'repos/{repo}/releases/{release["id"]}/assets?per_page=100'
+            pages = json.loads(output("gh", "api", "--paginate", "--slurp", url))
+            entries = [a for page in pages for a in page]
         return {a["name"]: {"url": a["browser_download_url"], "digest": a["digest"], "size": a["size"]}
-                for page in pages for a in page if a["state"] == "uploaded" and a.get("digest")
+                for a in entries if a["state"] == "uploaded" and a.get("digest")
                 and a["name"].endswith(".tar.zst") and bucket(a["name"]) == release["tag_name"]}
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        return {name: a for group in pool.map(assets, releases) for name, a in group.items()}
+    return {name: a for release in releases for name, a in assets(release).items()}
 
 
 def prepare(repo):
@@ -68,10 +71,6 @@ def prepare(repo):
         ready = [0]
     print(f'{data["modules"]} modules, {data["edges"]} imports, {len(shards)} shards; '
           f'{len(present)} released, {len(ready)} ready')
-    if "GITHUB_OUTPUT" in os.environ:
-        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-            print("ready=" + json.dumps(ready[:32]), file=f)
-            print("complete=" + str(len(present) == len(shards)).lower(), file=f)
     return data
 
 
@@ -83,8 +82,7 @@ def relative_module(path):
     return None
 
 
-def dependencies(modules):
-    _, edges = graph()
+def dependencies(modules, edges):
     seen = set()
     todo = list(modules)
     while todo:
@@ -121,12 +119,14 @@ def unpack(asset, required):
                 raise RuntimeError("truncated zstd stream")
 
 
-def restore(data, index, modules):
-    wanted = dependencies(modules)
-    for shard in data["shards"]:
+def restore(data, index, modules, edges=None):
+    if edges is None:
+        _, edges = graph()
+    wanted = dependencies(modules, edges)
+    def restore_one(shard):
         needed = wanted.intersection(shard["modules"])
         if not needed:
-            continue
+            return
         key = shard["key"]
         marker = receipt(key)
         installed = set(marker.read_text().splitlines()) if marker.exists() else set()
@@ -136,6 +136,9 @@ def restore(data, index, modules):
             unpack(index[asset_name(key)], needed)
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text("\n".join(sorted(installed | needed)))
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(restore_one, (s for s in data["shards"] if not wanted.isdisjoint(s["modules"]))))
+
 
 
 def lake(modules, reuse=False):
@@ -149,7 +152,7 @@ def build(data, index, number):
     mods = set(shard["modules"])
     _, edges = graph()
     imports = {d for m in mods for d in edges[m]} - mods
-    restore(data, index, imports)
+    restore(data, index, imports, edges)
     lake(imports, reuse=True)
     lake(mods)
     archive = Path(asset_name(shard["key"])).resolve()
@@ -192,27 +195,45 @@ def upload(repo, key, path):
     if subprocess.run(["gh", "release", "view", tag, "-R", repo], stdout=subprocess.DEVNULL,
                       stderr=subprocess.DEVNULL).returncode:
         result = subprocess.run(["gh", "release", "create", tag, "-R", repo, "--target",
-                                 output("git", "rev-parse", "HEAD"), "--prerelease", "--latest=false",
+                                 os.environ.get("BUILD_SOURCE_SHA") or output("git", "rev-parse", "HEAD"), "--prerelease", "--latest=false",
                                  "--title", tag, "--notes", "Reusable compiled Lake shards for Linux x86-64."])
         if result.returncode:
             run("gh", "release", "view", tag, "-R", repo)
-    run("gh", "release", "upload", tag, "-R", repo, str(path))
-    assets = json.loads(output("gh", "release", "view", tag, "-R", repo, "--json", "assets"))["assets"]
-    remote = next(a for a in assets if a["name"] == path.name)
-    if remote["digest"] != "sha256:" + sha256(path):
+    release_id = output("gh", "api", f"repos/{repo}/releases/tags/{tag}", "--jq", ".id")
+    url = f"https://uploads.github.com/repos/{repo}/releases/{release_id}/assets?name={path.name}"
+    actual = output("gh", "api", "--method", "POST", "-H", "Content-Type: application/octet-stream",
+                    "--input", str(path), url, "--jq", ".digest")
+    if actual != "sha256:" + sha256(path):
         raise RuntimeError("uploaded asset digest mismatch")
+
 
 
 def main():
     command, *args = sys.argv[1:]
     repo = os.environ.get("GITHUB_REPOSITORY", "the-omega-institute/riemann-hypothesis")
-    if command in {"prepare", "restore"}:
+    if command == "publish":
+        key, source = args
+        os.environ["BUILD_SOURCE_SHA"] = source
+        upload(repo, key, Path(asset_name(key)))
+        return
+    if command in {"prepare", "restore", "select"}:
         prepare(repo)
     if command == "prepare":
         return
     data = json.loads(gzip.decompress(PLAN.read_bytes()))
     index = json.loads(INDEX.read_text())
-    if command == "build":
+    if command == "select":
+        numbers = json.loads(os.environ["PART_IDS"])
+        selected = []
+        for n in numbers:
+            shard = data["shards"][n]
+            if asset_name(shard["key"]) not in index:
+                if any(asset_name(data["shards"][p]["key"]) not in index for p in shard["deps"]):
+                    raise ValueError(f"release prerequisite missing for shard {n}")
+                selected.append({"number": n, "key": shard["key"]})
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            print("matrix=" + json.dumps(selected), file=f)
+    elif command == "build":
         build(data, index, int(args[0]))
     elif command == "upload":
         key = data["shards"][int(args[0])]["key"]
