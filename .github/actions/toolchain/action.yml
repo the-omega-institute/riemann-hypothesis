@@ -3,10 +3,18 @@ description: Install the repository toolchain and restore Mathlib binaries
 runs:
   using: composite
   steps:
+    - name: Restore pinned Lean toolchain
+      id: lean-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.elan/bin
+          ~/.elan/toolchains
+        key: rh-lean-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}
     - name: Install elan
       shell: bash
       run: |
-        if ! command -v elan >/dev/null; then
+        if [[ ! -x "$HOME/.elan/bin/elan" ]] && ! command -v elan >/dev/null; then
           curl --fail --silent --show-error --location --retry 3 https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
         fi
         echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
@@ -21,6 +29,14 @@ runs:
           sleep "$delay"
         done
         lean --version
+    - name: Save pinned Lean toolchain
+      if: steps.lean-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.elan/bin
+          ~/.elan/toolchains
+        key: ${{ steps.lean-cache.outputs.cache-primary-key }}
     - name: Restore dependency builds
       uses: actions/cache@v4
       id: mathlib
