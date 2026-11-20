@@ -182,6 +182,8 @@ def restore(data, index, modules, edges=None, *, allow_missing=False):
     if edges is None:
         _, edges = graph()
     wanted = dependencies(modules, edges)
+    if len(wanted) >= 80_000 and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted":
+        run("bash", str(Path(__file__).with_name("large-workspace.sh")))
     def restore_one(item):
         number, shard = item
         needed = wanted.intersection(shard["modules"])

@@ -53,6 +53,8 @@ the installation as soon as `lean --version` succeeds. Mathlib has a
 separate cache keyed by the toolchain and package manifest. If a Release
 download exhausts its retries, CI can recover the same shard from the original
 build artifact during its one-day retention and verify the Release SHA-256.
+Standard hosted jobs that restore at least 80,000 project modules use a
+zstd-compressed Btrfs build directory when free disk space is below 128 GiB.
 The default runner is Ubuntu 24.04 x86-64. The repository variable
 `RH_LINUX_RUNNER` can select a Linux x86-64 runner with more memory or disk.
 
