@@ -1,28 +1,32 @@
-# riemann-hypothesis
+# Riemann hypothesis · reproducible Lean builds
 
-## Reusing the compiled proof
+Levent Alpöge released Lean source for a claimed proof of the Riemann hypothesis and GRH for Dirichlet L-functions. **The Omega Institute builds and distributes that source in reusable pieces so others can check it on their own machines.** Deicyde mirrored the original archive and supplied the independent Comparator challenge. The proof declarations are in `src/Main.lean`. [Author’s announcement](https://alpo.ge/remark.pdf) · [Upstream verification project](https://github.com/Deicyde/riemann-hypothesis) · [Main.lean](src/Main.lean)
 
-This fork publishes Linux x86-64 Lake build products in GitHub Releases. The
-`Lean release build` workflow walks the local imports reachable from `Main`.
-Each shard key includes its source blobs, all prerequisite shard keys, the Lake
-configuration, the pinned toolchain and the package manifest. Successful shards
-survive new workflows and expiration of the Actions cache.
+## Verify locally
 
-On Linux x86-64, check out the desired commit, install its pinned Lean
-toolchain, and run these commands with GitHub CLI, Python 3.12+, curl and zstd:
+Use x86-64 Linux with Git, Python 3.12 or later, curl, zstd, and elan with its `lake` command on your PATH. Elan selects the pinned Lean 4.33.1 toolchain. Public Release downloads work without a GitHub account. The coverage command also works on macOS. [Install elan](https://lean-lang.org/install/)
 
 ```sh
-lake exe cache get
-python3 ci/parts.py restore Main
+git clone --depth 1 https://github.com/the-omega-institute/riemann-hypothesis.git
+cd riemann-hypothesis
+./verify --status Main
+./verify Main
 ```
 
-You can replace `Main` with any released module, for example `Statements`.
-The command selects its import closure, verifies GitHub's SHA-256 for each
-downloaded archive and finishes with `lake --no-build build`. Downloads are
-reusable before the entire proof has built. The `lean-parts-v1-*` prereleases
-hold compiled parts. A final `build-<commit>` release includes the dependency
-plan, the checksums and URLs of all parts, and the axiom report for the five
-statements. The final job imports the compiled `Main` on a fresh runner.
+`--status` reports the source commit, how many required shards are available, and their total compressed size. At partial coverage, the default verification command exits before downloading the proof. You can check a small published module immediately, or explicitly choose to build the missing part of `Main`.
+
+```sh
+./verify BuildAid.D1           # Small environment setup module for testing the full restore and replay path
+./verify --build-missing Main  # Restore published dependencies, then compile the missing modules locally
+```
+
+The script fetches the pinned Mathlib build cache, checks each downloaded shard against its GitHub Release SHA-256, and restores the files needed by the selected module. It then runs `lake --no-build build` and `lake env leanchecker --fresh`. The latter replays declarations from the module and its imports in an empty Lean environment on your machine. Restored files persist in `.lake/` for later invocations. The complete `Main` replay covers the full proof and Mathlib and can require substantial memory and disk. [Upstream build observations](verification/NOTES.md#building)
+
+For `Main`, the script also checks the five headline declarations against the allowed axioms `propext`, `Classical.choice`, and `Quot.sound`. It writes the output to `.lake/parts/axioms.txt`. A success message names the exact module replayed. For the independent multi-checker route, see [Running Comparator](#running-comparator).
+
+## How the fork publishes compiled shards
+
+CI partitions the actual import closure of `Main`. Each shard key covers the source blobs, prerequisite shard keys, build configuration, toolchain, and pinned packages. The `lean-parts-v1-*` prereleases hold compiled Linux x86-64 outputs. You can reuse them as soon as they appear, including across unchanged portions of different commits. The final `build-<commit>` release contains the complete dependency plan, shard URLs and checksums, and the five-theorem axiom report. [Live build](https://github.com/the-omega-institute/riemann-hypothesis/actions/workflows/lean-parts.yml) · [Release assets](https://github.com/the-omega-institute/riemann-hypothesis/releases)
 
 Start or resume the default branch build with
 `gh workflow run lean-parts.yml -R the-omega-institute/riemann-hypothesis`.
@@ -54,9 +58,9 @@ This repository is the submission, unmodified, plus those two files:
 - [`src/Challenge.lean`](src/Challenge.lean) imports only Mathlib and states the five theorems.
 - [`comparator.json`](comparator.json) is the Comparator config. The solution module is the submission's `Main`.
 
-Everything else we wrote is in [`verification/`](verification/NOTES.md).
+Upstream’s verification notes are in [`verification/`](verification/NOTES.md).
 
-## Status
+## Upstream verification status
 
 | Check | Result |
 |---|---|

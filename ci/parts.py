@@ -39,17 +39,20 @@ def asset_name(key):
     return key + ".tar.zst"
 
 
-def inventory(repo):
+def api_pages(endpoint):
+    return json.loads(output("gh", "api", "--paginate", "--slurp", endpoint))
+
+
+def inventory(repo, pages_for=api_pages):
     # Repositories start with zero buckets. Propagate API errors to avoid a false cache miss.
-    pages = json.loads(output("gh", "api", "--paginate", "--slurp",
-                              f"repos/{repo}/releases?per_page=100"))
+    pages = pages_for(f"repos/{repo}/releases?per_page=100")
     releases = [r for page in pages for r in page if r["tag_name"].startswith("lean-parts-v1-")]
     def assets(release):
         entries = release["assets"]
         # Fall back to the paginated endpoint at common nested-collection limits.
         if len(entries) in {30, 100, 1000}:
             url = f'repos/{repo}/releases/{release["id"]}/assets?per_page=100'
-            pages = json.loads(output("gh", "api", "--paginate", "--slurp", url))
+            pages = pages_for(url)
             entries = [a for page in pages for a in page]
         return {a["name"]: {"url": a["browser_download_url"], "digest": a["digest"], "size": a["size"]}
                 for a in entries if a["state"] == "uploaded" and a.get("digest")
@@ -101,7 +104,7 @@ def unpack(asset, required):
     BUILD.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=STATE) as tmp:
         archive = Path(tmp) / "part.zst"
-        run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4",
+        run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4", "--retry-all-errors", "--retry-max-time", "300",
             "--output", str(archive), asset["url"])
         if "sha256:" + sha256(archive) != asset["digest"]:
             raise ValueError("Release SHA-256 mismatch: " + asset["url"])
@@ -111,7 +114,11 @@ def unpack(asset, required):
                     if relative_module(entry.name) in required:
                         if not entry.isfile():
                             raise ValueError(entry.name)
-                        tar.extract(entry, BUILD, filter="data")
+                        # Python 3.12 tarfile creates missing parents without exist_ok.
+                        # Validate first, then create shared parents safely across workers.
+                        member = tarfile.data_filter(entry, str(BUILD))
+                        (BUILD / member.name).parent.mkdir(parents=True, exist_ok=True)
+                        tar.extract(member, BUILD, filter="data")
             while reader.stdout.read(65536):
                 pass
             reader.stdout.close()
@@ -175,7 +182,7 @@ def build(data, index, number):
     return archive
 
 
-def audit():
+def audit(report_path=Path("axioms.txt")):
     result = output("lake", "env", "lean", "ci/Audit.lean")
     import re
     reports = re.findall(r"'([^']+)' depends on axioms:\s*\[([^\]]*)\]", result)
@@ -186,7 +193,7 @@ def audit():
             for _, axioms in reports):
         raise ValueError("unexpected axiom report:\n" + result)
     print(result)
-    Path("axioms.txt").write_text(result + "\n")
+    report_path.write_text(result + "\n")
 
 
 def upload(repo, key, path):

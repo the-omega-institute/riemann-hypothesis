@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Restore published Lean build products and replay the selected module locally."""
+import argparse
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+ROOT = Path(__file__).resolve().parent
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / "ci"))
+from parts import STATE, asset_name, audit, dependencies, graph, inventory, lake, plan, restore, run
+
+REPO = "the-omega-institute/riemann-hypothesis"
+
+
+def public_pages(endpoint):
+    pages = []
+    page = 1
+    while True:
+        url = f"https://api.github.com/{endpoint}&page={page}"
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "omega-lean-verify"}
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        try:
+            with urlopen(Request(url, headers=headers), timeout=90) as response:
+                pages.append(json.load(response))
+                if 'rel="next"' not in response.headers.get("Link", ""):
+                    return pages
+        except HTTPError as err:
+            if err.code in (403, 429):
+                raise SystemExit("GitHub limited this Release lookup. Retry later or set GH_TOKEN for public read access.") from err
+            raise
+        page += 1
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("module", nargs="?", default="Main", help="exact Lean module name (default: Main)")
+    parser.add_argument("--status", action="store_true", help="report Release coverage without installing or downloading artifacts")
+    parser.add_argument("--build-missing", action="store_true", help="also compile locally when some required shards are unpublished")
+    args = parser.parse_args()
+    os.chdir(ROOT)
+    if sys.version_info < (3, 12):
+        parser.exit(2, "Use Python 3.12 or later.\n")
+    if not shutil.which("git"):
+        parser.exit(2, "Install git to read the source revision.\n")
+
+    source = graph()
+    data = plan(source)
+    modules = {args.module}
+    if not any(args.module in s["modules"] for s in data["shards"]):
+        parser.exit(2, f"{args.module!r} is outside the compiled Main import closure.\n")
+    wanted = dependencies(modules, source[1])
+    shards = [s for s in data["shards"] if not wanted.isdisjoint(s["modules"])]
+    index = inventory(REPO, public_pages)
+    available = [s for s in shards if asset_name(s["key"]) in index]
+    size = sum(index[asset_name(s["key"])]["size"] for s in available)
+    print(f'{data["head"]}  {args.module}: {len(available)}/{len(shards)} required shards published, '
+          f'{len(wanted)} project modules, {size / 2**20:.1f} MiB of available archives.', flush=True)
+    if args.status:
+        return
+    if len(available) < len(shards) and not args.build_missing:
+        parser.exit(2, "Some shards are still building. Retry later or use --build-missing to compile the remainder.\n")
+    if platform.system() != "Linux" or platform.machine().lower() not in {"x86_64", "amd64"}:
+        parser.exit(2, "The published binaries require x86-64 Linux. Use an x86-64 Linux environment for verification.\n")
+    for tool in ("elan", "lake", "curl", "zstd"):
+        if not shutil.which(tool):
+            parser.exit(2, f"Install {tool} and retry. See the prerequisites in README.md.\n")
+    os.environ["ELAN_TOOLCHAIN"] = (ROOT / "lean-toolchain").read_text().strip()
+    run("lake", "--version")
+    run("lake", "exe", "cache", "get")
+    STATE.mkdir(parents=True, exist_ok=True)
+    restore({"shards": available}, index, modules, source[1])
+    if len(available) < len(shards):
+        lake(modules)
+    lake(modules, reuse=True)
+    print(f"Replaying {args.module} and its imports with the pinned Lean kernel.", flush=True)
+    run("lake", "env", "leanchecker", "--fresh", "--verbose", args.module)
+    if args.module == "Main":
+        audit(STATE / "axioms.txt")
+        print(f"Five theorem axiom checks passed. Report: {STATE / 'axioms.txt'}")
+    print(f"Fresh kernel replay passed for {args.module}.", flush=True)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.CalledProcessError as exc:
+        sys.exit(exc.returncode if exc.returncode > 0 else 1)
+    except (OSError, ValueError) as exc:
+        sys.exit(str(exc))
