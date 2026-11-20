@@ -44,7 +44,9 @@ A new manual dispatch resumes after an interrupted coordinator.
 Actions caches elan and the pinned Lean toolchain by operating system,
 architecture, and the contents of `lean-toolchain`. A cold runner saves
 the installation as soon as `lean --version` succeeds. Mathlib has a
-separate cache keyed by the toolchain and package manifest.
+separate cache keyed by the toolchain and package manifest. If a Release
+download exhausts its retries, CI can recover the same shard from the original
+build artifact during its one-day retention and verify the Release SHA-256.
 The default runner is Ubuntu 24.04 x86-64. The repository variable
 `RH_LINUX_RUNNER` can select a Linux x86-64 runner with more memory or disk.
 

@@ -34,6 +34,7 @@ jobs:
   release:
     if: needs.plan.outputs.complete == 'true'
     needs: plan
+    permissions: {contents: read, actions: read}
     runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 350
     steps:
@@ -43,6 +44,7 @@ jobs:
         with: {name: plan, path: .lake/parts}
       - uses: ./.github/actions/toolchain
       - name: Restore Main on a clean runner and audit five theorems
+        env: {GH_TOKEN: '${{ github.token }}'}
         run: python3 ci/parts.py finalize
       - uses: actions/upload-artifact@v4
         with:

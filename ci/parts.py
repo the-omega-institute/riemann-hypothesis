@@ -3,12 +3,14 @@ import gzip
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
 import time
 import tempfile
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 from plan import graph, plan
@@ -121,12 +123,41 @@ def receipt(key):
     return STATE / "installed" / key
 
 
-def unpack(asset, required):
+def download_ci_copy(number, name, asset, archive):
+    repo = os.environ["GITHUB_REPOSITORY"]
+    endpoint = f"repos/{repo}/actions/artifacts"
+    pages = api_pages(f"{endpoint}?name=part-{number}&per_page=100")
+    for page in pages:
+        for artifact in page["artifacts"]:
+            if artifact["expired"] or artifact["workflow_run"]["head_branch"] != "main":
+                continue
+            bundle = archive.with_suffix(".zip")
+            with bundle.open("wb") as dest:
+                result = subprocess.run(["gh", "api", f'{endpoint}/{artifact["id"]}/zip'], stdout=dest)
+            if result.returncode:
+                continue
+            with zipfile.ZipFile(bundle) as cached:
+                if name not in cached.namelist() or cached.getinfo(name).file_size != asset["size"]:
+                    continue
+                with cached.open(name) as src, archive.open("wb") as dest:
+                    shutil.copyfileobj(src, dest)
+                if "sha256:" + sha256(archive) == asset["digest"]:
+                    print(f"Recovered {name} from Actions artifact {artifact['id']}", flush=True)
+                    return
+    raise RuntimeError(f"No retained Actions copy of {name}")
+
+
+def unpack(number, name, asset, required):
     BUILD.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=STATE) as tmp:
         archive = Path(tmp) / "part.zst"
-        run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4", "--retry-all-errors", "--retry-max-time", "300",
-            "--output", str(archive), asset["url"])
+        try:
+            run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4",
+                "--retry-all-errors", "--retry-max-time", "300", "--output", str(archive), asset["url"])
+        except subprocess.CalledProcessError:
+            if not (os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GH_TOKEN")):
+                raise
+            download_ci_copy(number, name, asset, archive)
         if "sha256:" + sha256(archive) != asset["digest"]:
             raise ValueError("Release SHA-256 mismatch: " + asset["url"])
         with subprocess.Popen(["zstd", "-qdc", archive], stdout=subprocess.PIPE) as reader:
@@ -147,25 +178,28 @@ def unpack(asset, required):
                 raise RuntimeError("truncated zstd stream")
 
 
-def restore(data, index, modules, edges=None):
+def restore(data, index, modules, edges=None, *, allow_missing=False):
     if edges is None:
         _, edges = graph()
     wanted = dependencies(modules, edges)
-    def restore_one(shard):
+    def restore_one(item):
+        number, shard = item
         needed = wanted.intersection(shard["modules"])
-        if not needed:
-            return
         key = shard["key"]
         marker = receipt(key)
         installed = set(marker.read_text().splitlines()) if marker.exists() else set()
         needed = {m for m in needed if m not in installed or
                   not (BUILD / "lib/lean" / (m.replace(".", "/") + ".olean")).exists()}
         if needed:
-            unpack(index[asset_name(key)], needed)
+            name = asset_name(key)
+            if allow_missing and name not in index:
+                return
+            unpack(number, name, index[name], needed)
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text("\n".join(sorted(installed | needed)))
     with ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(restore_one, (s for s in data["shards"] if not wanted.isdisjoint(s["modules"]))))
+        jobs = ((i, s) for i, s in enumerate(data["shards"]) if not wanted.isdisjoint(s["modules"]))
+        list(pool.map(restore_one, jobs))
 
 
 
