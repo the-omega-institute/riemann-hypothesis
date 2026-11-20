@@ -16,9 +16,25 @@ jobs:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
       - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
-        run: ./verify "$TARGET"
+      - name: Verify the mounted workspace and a released module
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          mkdir -p .lake/build
+          echo preserved > .lake/build/workspace-probe
+          bash ci/large-workspace.sh
+          test "$(findmnt -n -o FSTYPE -T .lake/build)" = btrfs
+          test "$(cat .lake/build/workspace-probe)" = preserved
+          bash ci/large-workspace.sh
+          python3 ci/parts.py restore BuildAid.D1
+      - name: Restore all currently released Main dependencies
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          PYTHONPATH=ci python3 - <<'PYCODE'
+          import gzip,json
+          from parts import PLAN,INDEX,restore
+          data=json.loads(gzip.decompress(PLAN.read_bytes()))
+          index=json.loads(INDEX.read_text())
+          restore(data,index,{"Main"},allow_missing=True)
+          PYCODE
+          sudo btrfs filesystem usage .lake/build
+          df -hT .
