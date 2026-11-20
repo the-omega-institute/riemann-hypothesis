@@ -37,7 +37,9 @@ jobs:
       max-parallel: 16
       matrix:
         part: ${{ fromJSON(needs.plan.outputs.ready) }}
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    runs-on: >-
+      ${{ (contains(fromJSON(vars.RH_LARGE_SHARDS || '[]'), matrix.part) && vars.RH_LARGE_RUNNER)
+          || vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +49,10 @@ jobs:
       - uses: ./.github/actions/toolchain
       - name: Restore prerequisite modules and compile shard
         env: {PART: '${{ matrix.part }}', LEAN_NUM_THREADS: '3'}
-        run: python3 ci/parts.py build "$PART"
+        run: |
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+          python3 ci/parts.py build "$PART"
       - uses: actions/upload-artifact@v4
         with:
           name: part-${{ matrix.part }}
@@ -84,7 +89,7 @@ jobs:
   release:
     if: needs.plan.outputs.complete == 'true'
     needs: plan
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.RH_LARGE_RUNNER || vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -92,6 +97,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with: {name: plan, path: .lake/parts}
       - uses: ./.github/actions/toolchain
+      - name: Report capacity before restoring Main
+        run: |
+          uname -m
+          df -h "$GITHUB_WORKSPACE"
+          free -h
       - name: Restore Main on a clean runner and audit five theorems
         run: python3 ci/parts.py finalize
       - uses: actions/upload-artifact@v4
