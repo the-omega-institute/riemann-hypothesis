@@ -104,7 +104,7 @@ def unpack(asset, required):
     BUILD.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=STATE) as tmp:
         archive = Path(tmp) / "part.zst"
-        run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4",
+        run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4", "--retry-all-errors", "--retry-max-time", "300",
             "--output", str(archive), asset["url"])
         if "sha256:" + sha256(archive) != asset["digest"]:
             raise ValueError("Release SHA-256 mismatch: " + asset["url"])
@@ -114,7 +114,11 @@ def unpack(asset, required):
                     if relative_module(entry.name) in required:
                         if not entry.isfile():
                             raise ValueError(entry.name)
-                        tar.extract(entry, BUILD, filter="data")
+                        # Python 3.12 tarfile creates missing parents without exist_ok.
+                        # Validate first, then create shared parents safely across workers.
+                        member = tarfile.data_filter(entry, str(BUILD))
+                        (BUILD / member.name).parent.mkdir(parents=True, exist_ok=True)
+                        tar.extract(member, BUILD, filter="data")
             while reader.stdout.read(65536):
                 pass
             reader.stdout.close()
