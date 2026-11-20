@@ -39,17 +39,20 @@ def asset_name(key):
     return key + ".tar.zst"
 
 
-def inventory(repo):
+def api_pages(endpoint):
+    return json.loads(output("gh", "api", "--paginate", "--slurp", endpoint))
+
+
+def inventory(repo, pages_for=api_pages):
     # Repositories start with zero buckets. Propagate API errors to avoid a false cache miss.
-    pages = json.loads(output("gh", "api", "--paginate", "--slurp",
-                              f"repos/{repo}/releases?per_page=100"))
+    pages = pages_for(f"repos/{repo}/releases?per_page=100")
     releases = [r for page in pages for r in page if r["tag_name"].startswith("lean-parts-v1-")]
     def assets(release):
         entries = release["assets"]
         # Fall back to the paginated endpoint at common nested-collection limits.
         if len(entries) in {30, 100, 1000}:
             url = f'repos/{repo}/releases/{release["id"]}/assets?per_page=100'
-            pages = json.loads(output("gh", "api", "--paginate", "--slurp", url))
+            pages = pages_for(url)
             entries = [a for page in pages for a in page]
         return {a["name"]: {"url": a["browser_download_url"], "digest": a["digest"], "size": a["size"]}
                 for a in entries if a["state"] == "uploaded" and a.get("digest")
@@ -175,7 +178,7 @@ def build(data, index, number):
     return archive
 
 
-def audit():
+def audit(report_path=Path("axioms.txt")):
     result = output("lake", "env", "lean", "ci/Audit.lean")
     import re
     reports = re.findall(r"'([^']+)' depends on axioms:\s*\[([^\]]*)\]", result)
@@ -186,7 +189,7 @@ def audit():
             for _, axioms in reports):
         raise ValueError("unexpected axiom report:\n" + result)
     print(result)
-    Path("axioms.txt").write_text(result + "\n")
+    report_path.write_text(result + "\n")
 
 
 def upload(repo, key, path):

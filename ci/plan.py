@@ -40,8 +40,8 @@ def graph():
     return files, deps
 
 
-def plan():
-    files, deps = graph()
+def plan(source_graph=None):
+    files, deps = source_graph if source_graph is not None else graph()
     height = {}
     def visit(mod):
         if mod not in height:
