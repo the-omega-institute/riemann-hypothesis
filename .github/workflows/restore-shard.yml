@@ -1,24 +1,37 @@
-name: Check a released module
-on:
-  workflow_dispatch:
-    inputs:
-      module:
-        description: Lean module to restore from published shards
-        type: string
-        required: true
-        default: BuildAid.D1
-permissions: {contents: read, actions: read}
+name: Test the runner's retained Release archive
+run-name: Restore one published archive across two self-hosted jobs
+on: workflow_dispatch
+permissions: {contents: read}
 jobs:
-  restore:
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 350
-    steps:
+  fill:
+    runs-on: [self-hosted, Linux, X64]
+    steps: &verify
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
-        run: ./verify "$TARGET"
+        with:
+          path: rh-cache-smoke-${{ github.job }}
+          sparse-checkout: ci
+          persist-credentials: false
+      - name: Open the verified archive from a fresh workspace
+        working-directory: rh-cache-smoke-${{ github.job }}
+        env: {MODE: '${{ github.job }}'}
+        run: |
+          PYTHONPATH=ci python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from unittest.mock import patch
+          import parts
+          from contextlib import nullcontext
+          name = 'd93c757cdf2f1a69df1dc48e4398c294fde3df91829f5a2bb5ca79174f55de09.tar.zst'
+          asset = {'digest': 'sha256:80afd28e0391030d6d657ac485e276769ce654c0304ff477ce7f2452f09a50ab',
+                   'size': 12432, 'url': f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/releases/download/lean-parts-v1-d/{name}'}
+          offline = os.environ['MODE'] == 'offline'
+          forbid = patch.object(parts, 'fetch_archive', side_effect=AssertionError('Unexpected network download'))
+          with (forbid if offline else nullcontext()), parts.release_archive(0, name, asset) as archive:
+              assert 'sha256:' + parts.sha256(archive) == asset['digest']
+              assert archive.is_relative_to(Path(os.environ['RUNNER_TEMP']).parent / 'rh-release-cache')
+              print(os.environ['RUNNER_NAME'], os.environ['MODE'], archive, archive.stat().st_size)
+          PY
+  offline:
+    needs: fill
+    runs-on: [self-hosted, Linux, X64]
+    steps: *verify
