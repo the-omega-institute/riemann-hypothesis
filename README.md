@@ -67,7 +67,10 @@ JSON array of the selected shard numbers, then dispatch `early-groups.yml`
 with the shard's `number` and its full `key` from the plan. The workflow
 compiles independent groups in parallel and publishes each verified archive
 under a content-derived Release key. A later group can restore these modules
-even while their parent shard is incomplete. The parent restores its groups,
+even while their parent shard is incomplete. When a connected group has an
+unavailable import, the workflow publishes any individual members whose imports
+are ready. The later group restores those members before building the rest.
+The parent restores its groups,
 runs Lake's no-build check, and packages the full shard at its original key.
 If an independent full build produces different binary hashes for those modules,
 the Release can also hold a full archive assembled from the published groups.
