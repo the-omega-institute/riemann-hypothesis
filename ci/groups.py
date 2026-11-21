@@ -24,6 +24,24 @@ def group_key(parent, modules):
     return digest(["lean-module-group/v1", parent, *modules])
 
 
+def assembly_inputs(shards, numbers):
+    """Map opted-in shards to the archives required to restore every target."""
+    enabled = set(json.loads(os.environ.get("RH_GROUP_SHARDS") or "[]")).intersection(numbers)
+    if not enabled:
+        return {}
+    _, edges = graph()
+    inputs = {}
+    for number in enabled:
+        shard = shards[number]
+        inputs[number] = {parts.asset_name(group_key(shard["key"], modules))
+                          for modules in module_groups(shard["modules"], edges)}
+    return inputs
+
+
+def complete_assemblies(inputs, index):
+    return {number for number, names in inputs.items() if names and names.issubset(index)}
+
+
 def published_groups(data, index, edges):
     for number, shard in enumerate(data["shards"]):
         if parts.asset_name(shard["key"]) in index:

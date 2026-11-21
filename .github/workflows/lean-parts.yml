@@ -25,6 +25,7 @@ jobs:
       - id: dispatch
         env:
           GH_TOKEN: ${{ github.token }}
+          RH_GROUP_SHARDS: ${{ vars.RH_GROUP_SHARDS }}
           BUILD_SESSION: ${{ inputs.session }}
         run: python3 ci/schedule.py
       - uses: actions/upload-artifact@v4

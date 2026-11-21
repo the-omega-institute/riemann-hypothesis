@@ -19,6 +19,7 @@ jobs:
       - id: select
         env:
           GH_TOKEN: ${{ github.token }}
+          RH_GROUP_SHARDS: ${{ vars.RH_GROUP_SHARDS }}
           PART_IDS: ${{ inputs.parts }}
         run: python3 ci/parts.py select
       - uses: actions/upload-artifact@v4
