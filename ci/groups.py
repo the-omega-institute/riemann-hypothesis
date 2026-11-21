@@ -24,10 +24,42 @@ def group_key(parent, modules):
     return digest(["lean-module-group/v1", parent, *modules])
 
 
+def published_groups(data, index, edges):
+    for number, shard in enumerate(data["shards"]):
+        if parts.asset_name(shard["key"]) in index:
+            continue
+        for group_id, modules in enumerate(module_groups(shard["modules"], edges)):
+            name = parts.asset_name(group_key(shard["key"], modules))
+            if name in index:
+                yield number, group_id, name, modules
+
+
+def install_partial_imports(data, index, imports, edges):
+    wanted = parts.dependencies(imports, edges)
+    for number, group_id, name, modules in published_groups(data, index, edges):
+        overlap = wanted.intersection(modules)
+        if not overlap:
+            continue
+        marker = parts.receipt(data["shards"][number]["key"])
+        installed = set(marker.read_text().splitlines()) if marker.exists() else set()
+        outputs = {m: parts.BUILD / "lib/lean" / (m.replace(".", "/") + ".olean") for m in overlap}
+        needed = {m for m, path in outputs.items() if m not in installed or not path.is_file()}
+        if not needed:
+            continue
+        parts.unpack(f"{number}-group-{group_id}", name, index[name], needed)
+        if any(not outputs[m].is_file() for m in needed):
+            raise ValueError(f"{name} did not restore all requested modules")
+        # Record only installed modules; the canonical archive is still unpublished.
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("\n".join(sorted(installed | needed)))
+
+
 def ready_groups(data, index, number, edges):
     shard = data["shards"][number]
     available = {module for part in data["shards"] if parts.asset_name(part["key"]) in index
                  for module in part["modules"]}
+    for _, _, _, modules in published_groups(data, index, edges):
+        available.update(modules)
     result = []
     if parts.asset_name(shard["key"]) not in index:
         for i, modules in enumerate(module_groups(shard["modules"], edges)):
@@ -50,6 +82,7 @@ def reuse(data, number, edges, repo):
     prebuilt = {m for _, _, modules in found for m in modules}
     if prebuilt:
         imports = {dep for m in prebuilt for dep in edges[m]} - prebuilt
+        install_partial_imports(data, index, imports, edges)
         parts.restore(data, index, imports, edges)
         for i, name, modules in found:
             parts.unpack(f"{number}-group-{i}", name, index[name], modules)
@@ -84,6 +117,8 @@ def main():
         modules = module_groups(shard["modules"], edges)[int(group)]
         if key != group_key(shard["key"], modules):
             raise ValueError("Group key does not match the source plan")
+        imports = {dep for m in modules for dep in edges[m]} - set(modules)
+        install_partial_imports(data, index, imports, edges)
         data["shards"][number] = dict(shard, modules=modules, key=key)
         parts.build(data, index, number)
     else:
