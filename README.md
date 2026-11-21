@@ -69,6 +69,10 @@ compiles independent groups in parallel and publishes each verified archive
 under a content-derived Release key. A later group can restore these modules
 even while their parent shard is incomplete. The parent restores its groups,
 runs Lake's no-build check, and packages the full shard at its original key.
+If an independent full build produces different binary hashes for those modules,
+the Release can also hold a full archive assembled from the published groups.
+Its filename includes the SHA-256 of the independent archive. CI and `./verify`
+select the assembled archive so downstream Lake traces see the original group outputs.
 The early workflow and the parent share a concurrency lock.
 
 Actions caches elan and the pinned Lean toolchain by operating system,
