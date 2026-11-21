@@ -8,6 +8,19 @@ The Omega Institute’s *Symmetry on the Critical Line: How the Riemann Hypothes
 
 [Read the English edition](https://rh.trureturing.org/riemann-hypothesis/en/) · [Book source on GitHub](https://github.com/the-omega-institute/riemann-hypothesis-book)
 
+## Public kernel replay results
+
+By 21 November 2026, public reports recorded successful kernel checks of the five declarations in `Main.lean`, covering Mathlib’s Riemann hypothesis and the corresponding results for Dirichlet L-functions. The published axiom audit lists only `propext`, `Classical.choice`, and `Quot.sound` for each declaration. [Five-theorem audit](https://math.mit.edu/~drew/grh/audit.log)
+
+| Public run | Input and result | Primary evidence |
+|---|---|---|
+| Andrew Sutherland (MIT) | Lean’s `leanchecker` replayed all 175,187 compiled project modules with zero rejections. `lean4lean` also accepted every module, including five that needed a higher step limit. | [Run report](https://math.mit.edu/~drew/grh/) · [Five reruns](https://math.mit.edu/~drew/grh/lean4lean-raised-fuel.log) |
+| Sutherland, exported proof | The independent Rust kernel nanoda and `con-leche --verified` accepted the full solution export. In a separate comparison against the Mathlib-only challenge, con-leche identified all five requested theorems as “justified by the solution.” | [nanoda](https://math.mit.edu/~drew/grh/nanoda.log) · [con-leche](https://math.mit.edu/~drew/grh/con-leche-master.log) · [Statement comparison](https://math.mit.edu/~drew/grh/con-leche-compare.log) |
+| `mrubinst/grh-lean-verification` | A second build replayed each module’s declarations through Lean 4.33.1 using `replayFromImports`. The sets of compiled and successfully replayed modules matched exactly, with 175,187 entries each. | [Replay summary](https://github.com/mrubinst/grh-lean-verification/blob/cd2dad86c884ab17f348189edae2e5c3248533a9/replay_summary.txt) |
+| Elliot Arledge and Luis Rivera, separate builds | Their five-theorem exports have the same SHA-256 (`4301ce48…3072e7e`). Each nanoda log records 1,484,729 declarations checked with zero errors. Rivera also published a con-leche comparison against a Mathlib-only challenge that lists all five theorems as justified. | [Arledge’s receipt](https://github.com/Infatoshi/rh-verification-receipts/blob/ac99f18cef21952de094234fab95db342ed16638/VERIFICATION_RESULT.txt) · [Rivera’s checksum](https://github.com/chubakueno/riemann-lean-verification/blob/975074872445beee5af4ea2d8e296b4b59f1d592/evidence/export/main.ndjson.sha256) · [Rivera’s nanoda output](https://github.com/chubakueno/riemann-lean-verification/blob/975074872445beee5af4ea2d8e296b4b59f1d592/evidence/nanoda/nanoda-out.txt) · [Rivera’s comparison](https://github.com/chubakueno/riemann-lean-verification/blob/975074872445beee5af4ea2d8e296b4b59f1d592/evidence/con-leche-compare/compare-out-windows.txt) |
+
+Sutherland’s 09:30 UTC report still listed the end-to-end `lake comparator` run on the full submission as in progress. The LUMI team separately reported a sandboxed build of all 175,187 modules and a matching `Main.olean` hash. This fork publishes its own build and audit results through GitHub Actions and Releases. [MIT status](https://math.mit.edu/~drew/grh/) · [LUMI build record](https://github.com/aapolipponen/rh-lean-check-lumi/blob/82d91dbbd04d71f2cb45c3f2898f421b91c1c9d7/results/build-summary.json) · [Omega build](https://github.com/the-omega-institute/riemann-hypothesis/actions/workflows/lean-parts.yml)
+
 ## Verify locally
 
 Use x86-64 Linux with Git, Python 3.12 or later, curl, zstd, and elan with its `lake` command on your PATH. Elan selects the pinned Lean 4.33.1 toolchain. Public Release downloads work without a GitHub account. The coverage command also works on macOS. [Install elan](https://lean-lang.org/install/)
@@ -89,7 +102,7 @@ Upstream’s verification notes are in [`verification/`](verification/NOTES.md).
 | No `sorry`, `axiom`, `native_decide`, `unsafe`, `implemented_by` or `opaque` in the source | pass ([scan](verification/static-scan.txt)) |
 | All nine dependency pins are official upstream commits | pass ([notes](verification/NOTES.md#dependencies)) |
 | The Comparator route below, on a Mathlib-sized test | pass ([notes](verification/NOTES.md#smoke-test)) |
-| **Comparator on the submission** | **not yet run**; the build is in progress and takes hours |
+| Upstream’s end-to-end Comparator on the submission | Upstream reported its build in progress on 21 November 2026. [Upstream run notes](https://github.com/leanprover-community/riemann-hypothesis/blob/6b1e1b8e9d683841024757f158fda63a32bbeae7/verification/NOTES.md#results) |
 
 ## The statements
 
