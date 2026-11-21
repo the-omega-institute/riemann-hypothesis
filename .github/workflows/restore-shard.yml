@@ -1,24 +1,21 @@
-name: Check a released module
-on:
-  workflow_dispatch:
-    inputs:
-      module:
-        description: Lean module to restore from published shards
-        type: string
-        required: true
-        default: BuildAid.D1
+name: Verify published module-group reuse
+run-name: Restore the 13 published modules in shard 8483 without compiling
+on: workflow_dispatch
 permissions: {contents: read, actions: read}
 jobs:
   restore:
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 350
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
+        with: {ref: 6977b88c83a1254561b4d79476211d7a7ed945d7, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: plan, path: .lake/parts, run-id: '44898412020', github-token: '${{ github.token }}'}
       - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
-        run: ./verify "$TARGET"
+      - uses: actions/checkout@v4
+        with: {ref: e20033e06a53a2176d9e87004441415de2b4ace3, path: .rh-group-ci, sparse-checkout: ci, persist-credentials: false}
+      - name: Validate the released groups with the parent shard's Lake inputs
+        env: {GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '1', PYTHONUNBUFFERED: '1'}
+        run: |
+          python3 .rh-group-ci/ci/groups.py reuse 8483 > "$RUNNER_TEMP/reuse.log" || { tail -25 "$RUNNER_TEMP/reuse.log"; exit 1; }
+          grep -F 'Shard 8483: reused 13/20 modules from 1 groups' "$RUNNER_TEMP/reuse.log"
