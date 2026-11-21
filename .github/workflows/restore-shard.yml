@@ -1,24 +1,39 @@
-name: Check a released module
+name: Inspect reusable workflow input types
 on:
   workflow_dispatch:
     inputs:
-      module:
-        description: Lean module to restore from published shards
-        type: string
-        required: true
-        default: BuildAid.D1
-permissions: {contents: read, actions: read}
+      number: {type: number, required: true}
+permissions: {contents: write, actions: read}
 jobs:
-  restore:
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 350
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
-        run: ./verify "$TARGET"
+      - id: plan
+        env: {PROBE: '${{ toJSON(inputs) }}'}
+        run: |
+          echo "$PROBE"
+          echo 'matrix=[{"number":1,"group":0}]' >> "$GITHUB_OUTPUT"
+  dispatch:
+    needs: plan
+    strategy:
+      matrix:
+        item: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/one-shard.yml
+    with:
+      source: b170c6cadb944f69faab5b14d418a2a4606eb1d5
+      number: ${{ inputs.number }}
+      group: ${{ matrix.item.group }}
+      key: d93c757cdf2f1a69df1dc48e4398c294fde3df91829f5a2bb5ca79174f55de09
+  matrix_number:
+    needs: plan
+    strategy:
+      matrix:
+        item: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/one-shard.yml
+    with:
+      source: b170c6cadb944f69faab5b14d418a2a4606eb1d5
+      number: ${{ matrix.item.number }}
+      group: ${{ matrix.item.group }}
+      key: c9e8085ce52ee5df9458963b12b81c9bd14deecdbe4d676c4a29b9179dd66b0a
