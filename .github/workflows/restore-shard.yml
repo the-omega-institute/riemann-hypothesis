@@ -10,6 +10,29 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 1440
     steps:
+      - name: Prepare GitHub CLI and verify Release access
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: |
+          config=$(mktemp -d "$RUNNER_TEMP/rh-gh.XXXXXX")
+          echo "GH_CONFIG_DIR=$config" >> "$GITHUB_ENV"
+          export GH_CONFIG_DIR="$config"
+          if ! gh api --help | grep -- '--slurp' >/dev/null; then
+            tools="$(dirname "$RUNNER_TEMP")/rh-tools"
+            dir="$tools/gh_2.83.0_linux_amd64"
+            mkdir -p "$tools"
+            if [[ ! -x "$dir/bin/gh" ]]; then
+              temp=$(mktemp -d "$tools/.gh.XXXXXX")
+              curl -fsSL --retry 4 --retry-all-errors -o "$temp/gh.tar.gz" https://github.com/cli/cli/releases/download/v2.83.0/gh_2.83.0_linux_amd64.tar.gz
+              echo "a5cf6cdb40fc67751adf561126b3314044779cea81ba4f254fbe8e9a69f1676f  $temp/gh.tar.gz" | sha256sum --check
+              tar -xzf "$temp/gh.tar.gz" -C "$temp"
+              mv -T "$temp/gh_2.83.0_linux_amd64" "$dir" || test -x "$dir/bin/gh"
+              rm -rf "$temp"
+            fi
+            echo "$dir/bin" >> "$GITHUB_PATH"
+            export PATH="$dir/bin:$PATH"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/lean-parts-v1-f" --jq .tag_name
       - name: Record runner capacity
         run: |
           uname -m
