@@ -82,6 +82,13 @@ jobs:
           key: rh-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
       - if: steps.local-deps.outputs.hit != 'true' && steps.deps.outputs.cache-hit != 'true'
         run: lake exe cache get
+      - name: Check out the Release archive cache helper
+        uses: actions/checkout@v4
+        with:
+          ref: d3f850de1d27926949b13d1de8420b3b57a8770e
+          path: .rh-cache-tools
+          sparse-checkout: ci
+          persist-credentials: false
       - name: Restore prerequisites and build the pinned shard
         env: {GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '3', PYTHONUNBUFFERED: '1'}
         run: |
@@ -102,7 +109,7 @@ jobs:
           ) &
           monitor=$!
           trap 'kill "$monitor" 2>/dev/null || true' EXIT
-          python3 ci/parts.py build 8467
+          python3 .rh-cache-tools/ci/parts.py build 8467
       - uses: actions/upload-artifact@v4
         with:
           name: part-8467
