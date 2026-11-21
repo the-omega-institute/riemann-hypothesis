@@ -348,14 +348,16 @@ def main():
     data = json.loads(gzip.decompress(PLAN.read_bytes()))
     index = json.loads(INDEX.read_text())
     if command == "select":
+        from groups import assembly_inputs, complete_assemblies
+        shards = data["shards"]
         numbers = json.loads(os.environ["PART_IDS"])
-        selected = []
-        for n in numbers:
-            shard = data["shards"][n]
-            if asset_name(shard["key"]) not in index:
-                if any(asset_name(data["shards"][p]["key"]) not in index for p in shard["deps"]):
-                    raise ValueError(f"release prerequisite missing for shard {n}")
-                selected.append({"number": n, "key": shard["key"]})
+        present = {i for i, shard in enumerate(shards) if asset_name(shard["key"]) in index}
+        pending = [n for n in numbers if n not in present]
+        blocked = {n for n in pending if not present.issuperset(shards[n]["deps"])}
+        missing = blocked - complete_assemblies(assembly_inputs(shards, blocked), index)
+        if missing:
+            raise ValueError(f"release prerequisites missing for shards {sorted(missing)}")
+        selected = [{"number": n, "key": shards[n]["key"]} for n in pending]
         with open(os.environ["GITHUB_OUTPUT"], "a") as f:
             print("matrix=" + json.dumps(selected), file=f)
     elif command == "build":

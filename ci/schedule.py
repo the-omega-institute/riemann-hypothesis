@@ -5,6 +5,7 @@ import os
 import re
 import time
 
+from groups import assembly_inputs, complete_assemblies
 from parts import INDEX, api_pages, asset_name, inventory, prepare, run
 
 BATCH = 28  # Run title fits GitHub's display limit, including all shard numbers.
@@ -26,6 +27,7 @@ def schedule():
     session = os.environ.get("BUILD_SESSION") or os.environ["GITHUB_RUN_ID"]
     data = prepare(repo)
     head, shards = data["head"], data["shards"]
+    group_inputs = assembly_inputs(shards, range(len(shards)))
     tail = [max(1, s["bytes"]) for s in shards]
     for i in sorted(range(len(shards)), key=lambda i: shards[i]["stage"], reverse=True):
         for p in shards[i]["deps"]:
@@ -46,8 +48,9 @@ def schedule():
         # Allow for the Actions API's eventual visibility after workflow_dispatch.
         now = time.monotonic()
         active.update(i for i, t in submitted.items() if now - t < 180)
+        assembled = complete_assemblies(group_inputs, index)
         ready = [i for i, s in enumerate(shards) if i not in present and i not in active
-                 and attempts[i] < 3 and present.issuperset(s["deps"])]
+                 and attempts[i] < 3 and (i in assembled or present.issuperset(s["deps"]))]
         ready.sort(key=lambda i: (-tail[i], i))
         print(f"{len(present)}/{len(shards)} released; {len(active - present)} outstanding; dispatching {len(ready)}", flush=True)
         if not ready and not active - present:
