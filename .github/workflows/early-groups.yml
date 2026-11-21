@@ -35,6 +35,6 @@ jobs:
     uses: ./.github/workflows/one-shard.yml
     with:
       source: ${{ github.sha }}
-      number: ${{ inputs.number }}
+      number: ${{ matrix.item.number }}
       group: ${{ matrix.item.group }}
       key: ${{ matrix.item.key }}
