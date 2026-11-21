@@ -1,24 +1,169 @@
-name: Check a released module
-on:
-  workflow_dispatch:
-    inputs:
-      module:
-        description: Lean module to restore from published shards
-        type: string
-        required: true
-        default: BuildAid.D1
+name: Independent x64 build of shard 8476
+run-name: Build shard 8476 on the self-hosted x64 runner
+on: workflow_dispatch
 permissions: {contents: read, actions: read}
+env:
+  SOURCE: 1ef6c4e2e944fb2784ecf3168a84810bf50ca6db
+  KEY: f51aafc57ca864691ec560454f352bdaa5b5877614bf5474f42a9176f05c1faa
 jobs:
-  restore:
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 350
+  build:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 1440
+    steps:
+      - name: Record runner capacity
+        run: |
+          uname -m
+          nproc
+          free -h
+          df -hT .
+          for file in memory.max memory.swap.max cpu.max; do
+            if test -f "/sys/fs/cgroup/$file"; then cat "/sys/fs/cgroup/$file"; fi
+          done
+      - uses: actions/checkout@v4
+        with: {ref: '${{ env.SOURCE }}', clean: false, persist-credentials: false}
+      - name: Ensure zstd is available for cache and shard extraction
+        shell: bash
+        run: |
+          if ! command -v zstd; then
+            dir=$(mktemp -d "$RUNNER_TEMP/rh-zstd.XXXXXX")
+            cd "$dir"
+            apt-get download zstd
+            dpkg-deb -x ./*.deb tools
+            echo "$dir/tools/usr/bin" >> "$GITHUB_PATH"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: .lake/parts
+          run-id: '44928572943'
+          github-token: '${{ github.token }}'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Use Python 3.12 for verified tar extraction
+        env:
+          UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/rh-python
+          UV_CACHE_DIR: ${{ runner.temp }}/rh-uv-cache
+          UV_PYTHON_BIN_DIR: ${{ runner.temp }}/rh-python-bin
+          XDG_DATA_HOME: ${{ runner.temp }}/rh-uv-data
+        run: |
+          uv python install 3.12
+          interpreter=$(uv python find --managed-python 3.12)
+          "$interpreter" -c 'import tarfile; assert callable(tarfile.data_filter)'
+          dirname "$interpreter" >> "$GITHUB_PATH"
+      - name: Select the pinned native Lean binaries
+        shell: bash
+        run: |
+          test "$(cat lean-toolchain)" = leanprover/lean4:v4.33.1
+          bin="$HOME/.elan/toolchains/leanprover--lean4---v4.33.1/bin"
+          if ! "$bin/lean" --version 2>/dev/null | grep -Fq 'version 4.33.1,'; then
+            dest=$(mktemp -d "$RUNNER_TEMP/rh-lean.XXXXXX")
+            url=https://github.com/leanprover/lean4/releases/download/v4.33.1/lean-4.33.1-linux.tar.zst
+            curl --fail --location --retry 4 --retry-all-errors -o "$dest/lean.tar.zst" "$url"
+            echo "890afd185370f85666025b883914ab4f4b339136f8c96167b69cfb62aecaf235  $dest/lean.tar.zst" | sha256sum --check
+            tar --zstd -xf "$dest/lean.tar.zst" -C "$dest"
+            bin="$dest/lean-4.33.1-linux/bin"
+          fi
+          "$bin/lean" --version
+          "$bin/lake" --version
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Check Mathlib already restored in this pinned workspace
+        id: local-deps
+        run: |
+          if lake --no-build build +Mathlib.NumberTheory.LSeries.RiemannZeta:olean; then
+            echo 'hit=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Restore pinned Mathlib dependencies
+        if: steps.local-deps.outputs.hit != 'true'
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: .lake/packages
+          key: rh-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
+      - if: steps.local-deps.outputs.hit != 'true' && steps.deps.outputs.cache-hit != 'true'
+        run: lake exe cache get
+      - name: Restore prerequisites and build the pinned shard
+        env: {GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '3', PYTHONUNBUFFERED: '1'}
+        run: |
+          python3 - <<'PY'
+          import gzip, json, os
+          with gzip.open('.lake/parts/plan.json.gz') as file:
+              plan = json.load(file)
+          assert plan['head'] == os.environ['SOURCE']
+          assert plan['shards'][8476]['key'] == os.environ['KEY']
+          PY
+          (
+            while sleep 120; do
+              date -u
+              df -h .
+              free -h
+              ps -eo comm,stat,%cpu,rss,etime --sort=-rss | head -10 || true
+            done
+          ) &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true' EXIT
+          python3 - <<'PYTHON'
+          import json, os, sys
+          sys.path.insert(0, 'ci')
+          import parts
+          parts.INDEX.write_text(json.dumps(parts.inventory(os.environ['GITHUB_REPOSITORY'])))
+          PYTHON
+          python3 ci/groups.py reuse 8476
+          python3 ci/parts.py build 8476
+          python3 - <<'PYTHON'
+          import gzip, hashlib, json, os, subprocess, sys, tarfile
+          from pathlib import Path
+          sys.path.insert(0, "ci")
+          import groups, parts
+          def member_digests(archive):
+              with subprocess.Popen(["zstd", "-qdc", str(archive)], stdout=subprocess.PIPE) as reader:
+                  with tarfile.open(fileobj=reader.stdout, mode="r|") as tar:
+                      members = {e.name: hashlib.file_digest(tar.extractfile(e), "sha256").digest()
+                                 for e in tar if e.isfile()}
+                  while reader.stdout.read(65536): pass
+                  assert reader.wait() == 0
+              return members
+          with gzip.open(parts.PLAN) as stream:
+              shard = json.load(stream)["shards"][8476]
+          assert shard["key"] == os.environ["KEY"]
+          canonical = member_digests(Path(parts.asset_name(shard["key"])))
+          index = parts.inventory(os.environ["GITHUB_REPOSITORY"])
+          _, edges = groups.graph()
+          catalog = getattr(groups, "build_groups", groups.module_groups)(shard["modules"], edges)
+          count = 0
+          for i, modules in enumerate(catalog):
+              name = parts.asset_name(groups.group_key(shard["key"], modules))
+              if name not in index: continue
+              with parts.release_archive(f"8476-group-{i}", name, index[name]) as archive:
+                  stored = member_digests(archive)
+              local = {p: h for p, h in canonical.items() if parts.relative_module(p) in modules}
+              assert stored == local, f"canonical outputs differ from released group {i}"
+              count += 1
+          print(f"Validated identical payloads for {count} released groups.")
+          PYTHON
+      - uses: actions/upload-artifact@v4
+        with:
+          name: part-8476
+          path: '${{ env.KEY }}.tar.zst'
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 2
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: {contents: write, actions: read}
     steps:
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
-        run: ./verify "$TARGET"
+        with: {ref: '${{ env.SOURCE }}', sparse-checkout: ci, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: part-8476}
+      - name: Publish the shard if the hosted build has not published it
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/lean-parts-v1-${KEY:0:1}/$KEY.tar.zst"
+          status=$(curl -sSIL --retry 4 --retry-all-errors -o /dev/null -w '%{http_code}' "$url")
+          case "$status" in
+            200) echo 'The shard is already published.' ;;
+            404) python3 ci/parts.py publish "$KEY" "$SOURCE" ;;
+            *) echo "Release lookup returned $status" >&2; exit 1 ;;
+          esac
