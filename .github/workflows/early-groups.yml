@@ -1,0 +1,40 @@
+name: Build ready groups in a blocked shard
+run-name: Ready groups in shard ${{ inputs.number }}
+on:
+  workflow_dispatch:
+    inputs:
+      number: {type: number, required: true}
+      key: {type: string, required: true}
+concurrency:
+  group: lean-shard-${{ inputs.key }}
+  cancel-in-progress: false
+permissions: {contents: read}
+jobs:
+  plan:
+    if: github.repository == 'the-omega-institute/riemann-hypothesis' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - id: select
+        env: {GH_TOKEN: '${{ github.token }}', PART: '${{ inputs.number }}', KEY: '${{ inputs.key }}'}
+        run: python3 ci/groups.py plan "$PART" "$KEY"
+      - uses: actions/upload-artifact@v4
+        if: steps.select.outputs.matrix != '[]'
+        with: {name: plan, path: .lake/parts, include-hidden-files: true, retention-days: 3}
+  compile:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        item: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    permissions: {contents: write, actions: read}
+    uses: ./.github/workflows/one-shard.yml
+    with:
+      source: ${{ github.sha }}
+      number: ${{ inputs.number }}
+      group: ${{ matrix.item.group }}
+      key: ${{ matrix.item.key }}

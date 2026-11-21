@@ -5,6 +5,9 @@ on:
       source: {type: string, required: true}
       number: {type: number, required: true}
       key: {type: string, required: true}
+      group: {type: number, default: -1}
+env:
+  PART_ARTIFACT: ${{ inputs.group >= 0 && format('part-{0}-group-{1}', inputs.number, inputs.group) || format('part-{0}', inputs.number) }}
 concurrency:
   group: lean-shard-${{ inputs.key }}
   cancel-in-progress: false
@@ -35,16 +38,38 @@ jobs:
         with: {name: plan, path: .lake/parts}
       - uses: ./.github/actions/toolchain
         if: steps.lookup.outputs.hit == 'false'
+      - name: Get the group restore helper for this workflow revision
+        id: helper
+        if: steps.lookup.outputs.hit == 'false' && inputs.group < 0 && contains(fromJSON(vars.RH_GROUP_SHARDS || '[]'), inputs.number)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .rh-group-ci
+          sparse-checkout: ci
+          persist-credentials: false
+      - name: Restore completed groups and validate with Lake
+        if: steps.helper.outcome == 'success'
+        env: {PART: '${{ inputs.number }}', GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '3'}
+        run: python3 .rh-group-ci/ci/groups.py reuse "$PART"
       - id: build
         if: steps.lookup.outputs.hit == 'false'
-        env: {PART: '${{ inputs.number }}', LEAN_NUM_THREADS: '3', GH_TOKEN: '${{ github.token }}'}
+        env:
+          PART: ${{ inputs.number }}
+          GROUP: ${{ inputs.group }}
+          KEY: ${{ inputs.key }}
+          LEAN_NUM_THREADS: ${{ inputs.group >= 0 && '1' || '3' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python3 ci/parts.py build "$PART"
+          if (( GROUP >= 0 )); then
+            python3 ci/groups.py build "$PART" "$GROUP" "$KEY"
+          else
+            python3 ci/parts.py build "$PART"
+          fi
           echo 'compiled=true' >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         if: steps.build.outputs.compiled == 'true'
         with:
-          name: part-${{ inputs.number }}
+          name: ${{ env.PART_ARTIFACT }}
           path: '${{ inputs.key }}.tar.zst'
           compression-level: 0
           if-no-files-found: error
@@ -58,7 +83,7 @@ jobs:
       - uses: actions/checkout@v4
         with: {sparse-checkout: ci, persist-credentials: false}
       - uses: actions/download-artifact@v4
-        with: {name: 'part-${{ inputs.number }}', path: .}
+        with: {name: '${{ env.PART_ARTIFACT }}', path: .}
       - name: Commit this shard to Releases
         env: {GH_TOKEN: '${{ github.token }}', KEY: '${{ inputs.key }}', SOURCE: '${{ inputs.source }}'}
         run: python3 ci/parts.py publish "$KEY" "$SOURCE"

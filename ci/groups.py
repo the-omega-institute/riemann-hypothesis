@@ -1,0 +1,94 @@
+"""Compile connected groups with released imports and reuse them in their parent shard."""
+import gzip
+import json
+import os
+import sys
+
+import parts
+from plan import digest, graph
+
+
+def module_groups(modules, edges):
+    local = set(modules)
+    groups = []
+    for module in modules:
+        joined = {module} | (set(edges[module]) & local)
+        for other in [group for group in groups if group & joined]:
+            groups.remove(other)
+            joined.update(other)
+        groups.append(joined)
+    return sorted(sorted(group) for group in groups)
+
+
+def group_key(parent, modules):
+    return digest(["lean-module-group/v1", parent, *modules])
+
+
+def ready_groups(data, index, number, edges):
+    shard = data["shards"][number]
+    available = {module for part in data["shards"] if parts.asset_name(part["key"]) in index
+                 for module in part["modules"]}
+    result = []
+    if parts.asset_name(shard["key"]) not in index:
+        for i, modules in enumerate(module_groups(shard["modules"], edges)):
+            key = group_key(shard["key"], modules)
+            imports = {dep for module in modules for dep in edges[module]} - set(modules)
+            if parts.asset_name(key) not in index and imports <= available:
+                result.append({"group": i, "key": key})
+    return result
+
+
+def reuse(data, number, edges, repo):
+    shard = data["shards"][number]
+    # The parent may have waited on the group workflow's concurrency lock after planning.
+    index = parts.inventory(repo)
+    found = []
+    for i, modules in enumerate(module_groups(shard["modules"], edges)):
+        name = parts.asset_name(group_key(shard["key"], modules))
+        if name in index:
+            found.append((i, name, set(modules)))
+    prebuilt = {m for _, _, modules in found for m in modules}
+    if prebuilt:
+        imports = {dep for m in prebuilt for dep in edges[m]} - prebuilt
+        parts.restore(data, index, imports, edges)
+        for i, name, modules in found:
+            parts.unpack(f"{number}-group-{i}", name, index[name], modules)
+        parts.lake(prebuilt, reuse=True)
+    print(f"Shard {number}: reused {len(prebuilt)}/{len(shard['modules'])} modules from {len(found)} groups",
+          flush=True)
+
+
+def main():
+    command, raw_number, *args = sys.argv[1:]
+    number = int(raw_number)
+    repo = os.environ["GITHUB_REPOSITORY"]
+    if command == "plan":
+        parts.prepare(repo)
+    with gzip.open(parts.PLAN) as file:
+        data = json.load(file)
+    assert data["head"] == parts.output("git", "rev-parse", "HEAD")
+    shard = data["shards"][number]
+    _, edges = graph()
+    if command == "reuse":
+        reuse(data, number, edges, repo)
+        return
+    index = json.loads(parts.INDEX.read_text())
+    if command == "plan":
+        if shard["key"] != args[0]:
+            raise ValueError("Parent shard key does not match the source plan")
+        selected = ready_groups(data, index, number, edges)
+        with open(os.environ["GITHUB_OUTPUT"], "a") as file:
+            print("matrix=" + json.dumps(selected), file=file)
+    elif command == "build":
+        group, key = args
+        modules = module_groups(shard["modules"], edges)[int(group)]
+        if key != group_key(shard["key"], modules):
+            raise ValueError("Group key does not match the source plan")
+        data["shards"][number] = dict(shard, modules=modules, key=key)
+        parts.build(data, index, number)
+    else:
+        raise ValueError(command)
+
+
+if __name__ == "__main__":
+    main()

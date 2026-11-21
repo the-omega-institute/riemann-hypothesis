@@ -60,6 +60,16 @@ before toolchain installation let overlapping runs reuse completed work.
 The coordinator retries missing parts, rolls over before the hosted job time
 limit and reconstructs progress from Releases and active Actions batches.
 A new manual dispatch resumes after an interrupted coordinator.
+
+Near the end of a build, some modules in a blocked shard already have every
+external import available. Set the repository variable `RH_GROUP_SHARDS` to a
+JSON array of the selected shard numbers, then dispatch `early-groups.yml`
+with the shard's `number` and its full `key` from the plan. The workflow
+compiles independent groups in parallel and publishes each verified archive
+under a content-derived Release key. The parent shard restores those modules,
+runs Lake's no-build check, and packages the full shard at its original key.
+The early workflow and the parent share a concurrency lock.
+
 Actions caches elan and the pinned Lean toolchain by operating system,
 architecture, and the contents of `lean-toolchain`. A cold runner saves
 the installation as soon as `lean --version` succeeds. Mathlib has a
