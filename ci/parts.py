@@ -67,6 +67,17 @@ def api_pages(endpoint):
     return json.loads(github_read("api", "--paginate", "--slurp", endpoint))
 
 
+def select_group_archives(assets):
+    """Prefer the assembled outputs consumed by downstream builds of this exact archive."""
+    selected = assets.copy()
+    for name, asset in assets.items():
+        key = name.removesuffix(".tar.zst")
+        group_name = key + ".groups-" + asset["digest"].removeprefix("sha256:") + ".tar.zst"
+        if group_name in assets:
+            selected[name] = assets[group_name]
+    return selected
+
+
 def inventory(repo, pages_for=api_pages):
     # Repositories start with zero buckets. Propagate API errors to avoid a false cache miss.
     pages = pages_for(f"repos/{repo}/releases?per_page=100")
@@ -81,7 +92,7 @@ def inventory(repo, pages_for=api_pages):
         return {a["name"]: {"url": a["browser_download_url"], "digest": a["digest"], "size": a["size"]}
                 for a in entries if a["state"] == "uploaded" and a.get("digest")
                 and a["name"].endswith(".tar.zst") and bucket(a["name"]) == release["tag_name"]}
-    return {name: a for release in releases for name, a in assets(release).items()}
+    return select_group_archives({name: a for release in releases for name, a in assets(release).items()})
 
 
 def prepare(repo):
@@ -226,15 +237,26 @@ def restore(data, index, modules, edges=None, *, allow_missing=False):
         number, shard = item
         needed = wanted.intersection(shard["modules"])
         key = shard["key"]
+        name = asset_name(key)
+        asset = index.get(name)
         marker = receipt(key)
+        if asset and ".groups-" in asset["url"].rsplit("/", 1)[-1]:
+            name = asset["url"].rsplit("/", 1)[-1]
+            group_marker = receipt(name.removesuffix(".tar.zst"))
+            # An older checkout may have installed the independent build in this workspace.
+            if marker.exists():
+                group_marker.unlink(missing_ok=True)
+                marker.unlink()
+            marker = group_marker
         installed = set(marker.read_text().splitlines()) if marker.exists() else set()
         needed = {m for m in needed if m not in installed or
                   not (BUILD / "lib/lean" / (m.replace(".", "/") + ".olean")).exists()}
         if needed:
-            name = asset_name(key)
-            if allow_missing and name not in index:
+            if allow_missing and asset is None:
                 return
-            unpack(number, name, index[name], needed)
+            if asset is None:
+                raise KeyError(name)
+            unpack(number, name, asset, needed)
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text("\n".join(sorted(installed | needed)))
     with ThreadPoolExecutor(max_workers=4) as pool:
