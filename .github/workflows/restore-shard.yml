@@ -10,8 +10,8 @@ on:
 permissions: {contents: read, actions: read}
 jobs:
   restore:
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 350
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 1440
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}

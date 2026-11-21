@@ -1,42 +1,24 @@
 name: Pinned Lean and Mathlib
-description: Install the repository toolchain and restore Mathlib binaries
+description: Prepare the self-hosted Linux x64 runner and restore pinned dependencies
 runs:
   using: composite
   steps:
-    - name: Restore pinned Lean toolchain
-      id: lean-cache
-      uses: actions/cache/restore@v4
+    - name: Prepare writable tool and GitHub CLI directories
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/runner.sh"
+    - uses: astral-sh/setup-uv@v7
       with:
-        path: |
-          ~/.elan/bin
-          ~/.elan/toolchains
-        key: rh-lean-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}
-    - name: Install elan
+        enable-cache: false
+    - name: Select Python and the pinned Lean toolchain
       shell: bash
       run: |
-        if [[ ! -x "$HOME/.elan/bin/elan" ]] && ! command -v elan >/dev/null; then
-          curl --fail --silent --show-error --location --retry 3 https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
-        fi
-        echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-    - name: Install pinned Lean
-      shell: bash
-      run: |
-        for delay in 5 15 30; do
-          if lean --version; then
-            exit 0
-          fi
-          echo "Retrying the pinned Lean toolchain download in ${delay}s" >&2
-          sleep "$delay"
-        done
+        export UV_PYTHON_INSTALL_DIR="$(dirname "$RUNNER_TEMP")/rh-tools/python"
+        uv python install 3.12
+        interpreter=$(uv python find --managed-python 3.12)
+        "$interpreter" -c 'import tarfile; assert callable(tarfile.data_filter)'
+        dirname "$interpreter" >> "$GITHUB_PATH"
         lean --version
-    - name: Save pinned Lean toolchain
-      if: steps.lean-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          ~/.elan/bin
-          ~/.elan/toolchains
-        key: ${{ steps.lean-cache.outputs.cache-primary-key }}
+        lake --version
     - name: Restore dependency builds
       uses: actions/cache@v4
       id: mathlib
