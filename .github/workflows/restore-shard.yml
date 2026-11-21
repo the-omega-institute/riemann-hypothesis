@@ -37,7 +37,30 @@ jobs:
           path: .lake/parts
           run-id: '44855916596'
           github-token: '${{ github.token }}'
-      - uses: ./.github/actions/toolchain
+      - name: Select the pinned native Lean binaries
+        shell: bash
+        run: |
+          test "$(cat lean-toolchain)" = leanprover/lean4:v4.33.1
+          bin="$HOME/.elan/toolchains/leanprover--lean4---v4.33.1/bin"
+          if ! "$bin/lean" --version 2>/dev/null | grep -Fq 'version 4.33.1,'; then
+            dest=$(mktemp -d "$RUNNER_TEMP/rh-lean.XXXXXX")
+            url=https://github.com/leanprover/lean4/releases/download/v4.33.1/lean-4.33.1-linux.tar.zst
+            curl --fail --location --retry 4 --retry-all-errors -o "$dest/lean.tar.zst" "$url"
+            echo "890afd185370f85666025b883914ab4f4b339136f8c96167b69cfb62aecaf235  $dest/lean.tar.zst" | sha256sum --check
+            tar --zstd -xf "$dest/lean.tar.zst" -C "$dest"
+            bin="$dest/lean-4.33.1-linux/bin"
+          fi
+          "$bin/lean" --version
+          "$bin/lake" --version
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Restore pinned Mathlib dependencies
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: .lake/packages
+          key: rh-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
+      - if: steps.deps.outputs.cache-hit != 'true'
+        run: lake exe cache get
       - name: Restore prerequisites and build the pinned shard
         env: {GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '3', PYTHONUNBUFFERED: '1'}
         run: |
