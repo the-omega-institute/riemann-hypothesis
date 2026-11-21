@@ -36,21 +36,22 @@ jobs:
       - uses: actions/download-artifact@v4
         if: steps.lookup.outputs.hit == 'false'
         with: {name: plan, path: .lake/parts}
-      - uses: ./.github/actions/toolchain
+      - name: Get the runner setup and Release restore helpers from the workflow revision
         if: steps.lookup.outputs.hit == 'false'
-      - name: Get the group restore helper for this workflow revision
-        id: helper
-        if: steps.lookup.outputs.hit == 'false' && inputs.group < 0 && contains(fromJSON(vars.RH_GROUP_SHARDS || '[]'), inputs.number)
         uses: actions/checkout@v4
         with:
           ref: ${{ github.workflow_sha }}
-          path: .rh-group-ci
-          sparse-checkout: ci
+          path: .rh-ci
+          sparse-checkout: |
+            .github/actions/toolchain
+            ci
           persist-credentials: false
+      - uses: ./.rh-ci/.github/actions/toolchain
+        if: steps.lookup.outputs.hit == 'false'
       - name: Restore completed groups and validate with Lake
-        if: steps.helper.outcome == 'success'
+        if: steps.lookup.outputs.hit == 'false' && inputs.group < 0 && contains(fromJSON(vars.RH_GROUP_SHARDS || '[]'), inputs.number)
         env: {PART: '${{ inputs.number }}', GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '3'}
-        run: python3 .rh-group-ci/ci/groups.py reuse "$PART"
+        run: python3 .rh-ci/ci/groups.py reuse "$PART"
       - id: build
         if: steps.lookup.outputs.hit == 'false'
         env:
@@ -61,9 +62,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if (( GROUP >= 0 )); then
-            python3 ci/groups.py build "$PART" "$GROUP" "$KEY"
+            python3 .rh-ci/ci/groups.py build "$PART" "$GROUP" "$KEY"
           else
-            python3 ci/parts.py build "$PART"
+            python3 .rh-ci/ci/parts.py build "$PART"
           fi
           echo 'compiled=true' >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
