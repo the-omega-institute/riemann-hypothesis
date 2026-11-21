@@ -53,6 +53,12 @@ the installation as soon as `lean --version` succeeds. Mathlib has a
 separate cache keyed by the toolchain and package manifest. If a Release
 download exhausts its retries, CI can recover the same shard from the original
 build artifact during its one-day retention and verify the Release SHA-256.
+Self-hosted runners keep verified Release archives in `rh-release-cache/` next
+to the runner's temporary directory (typically `_work/rh-release-cache/`).
+Fresh checkouts share the files on that machine. Each restore verifies the
+archive against the published SHA-256 and downloads a replacement if needed.
+Set `RH_RELEASE_CACHE_DIR` in the runner environment to use a mounted disk,
+or set it when running `./verify` locally to share archives across clones.
 Standard hosted jobs that restore at least 80,000 project modules use a
 zstd-compressed Btrfs build directory when free disk space is below 128 GiB.
 The default runner is Ubuntu 24.04 x86-64. The repository variable
