@@ -1,6 +1,6 @@
 # Riemann hypothesis · reproducible Lean builds
 
-Levent Alpöge released Lean source for a claimed proof of the Riemann hypothesis and GRH for Dirichlet L-functions. **The Omega Institute builds and distributes that source in reusable pieces so others can check it on their own machines.** Deicyde mirrored the original archive and supplied the independent Comparator challenge. The proof declarations are in `src/Main.lean`. [Author’s announcement](https://alpo.ge/remark.pdf) · [Upstream verification project](https://github.com/Deicyde/riemann-hypothesis) · [Main.lean](src/Main.lean)
+Levent Alpöge proved the Riemann hypothesis in Lean. His library also contains results on zeros of Dirichlet L-functions. **The Omega Institute builds and distributes that source in reusable pieces so others can check it on their own machines.** Deicyde mirrored the original archive and supplied the independent Comparator challenge. The proof declarations are in `src/Main.lean`. [Author’s announcement](https://alpo.ge/remark.pdf) · [Upstream verification project](https://github.com/Deicyde/riemann-hypothesis) · [Main.lean](src/Main.lean)
 
 ## Companion book
 
@@ -10,7 +10,9 @@ The Omega Institute’s *Symmetry on the Critical Line: How the Riemann Hypothes
 
 ## Public kernel replay results
 
-By 21 November 2026, public reports recorded successful kernel checks of the five declarations in `Main.lean`, covering Mathlib’s Riemann hypothesis and the corresponding results for Dirichlet L-functions. The published axiom audit lists only `propext`, `Classical.choice`, and `Quot.sound` for each declaration. [Five-theorem audit](https://math.mit.edu/~drew/grh/audit.log)
+On 21 November 2026 the Lean and Mathlib communities certified Alpöge’s proof of Mathlib’s `RiemannHypothesis`. Their joint statement, endorsed by the Lean FRO and the Mathlib Initiative, reports that both Comparator and con-leche matched the proved theorem to the Mathlib statement. [Joint statement](https://leanprover-community.github.io/blog/posts/riemann-hypothesis/)
+
+Independent reports recorded successful kernel checks of the five declarations in `Main.lean`, covering Mathlib’s Riemann hypothesis and the corresponding results for Dirichlet L-functions. The published axiom audit lists only `propext`, `Classical.choice`, and `Quot.sound` for each declaration. [Five-theorem audit](https://math.mit.edu/~drew/grh/audit.log)
 
 | Public run | Input and result | Primary evidence |
 |---|---|---|
