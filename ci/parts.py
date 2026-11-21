@@ -1,4 +1,5 @@
 """Store Lake outputs in GitHub Releases and restore them by dependency digest."""
+from contextlib import contextmanager
 import gzip
 import hashlib
 import json
@@ -147,19 +148,56 @@ def download_ci_copy(number, name, asset, archive):
     raise RuntimeError(f"No retained Actions copy of {name}")
 
 
+def fetch_archive(number, name, asset, archive):
+    try:
+        run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4",
+            "--retry-all-errors", "--retry-max-time", "300", "--output", str(archive), asset["url"])
+    except subprocess.CalledProcessError:
+        if not (os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GH_TOKEN")):
+            raise
+        download_ci_copy(number, name, asset, archive)
+    if "sha256:" + sha256(archive) != asset["digest"]:
+        raise ValueError("Release SHA-256 mismatch: " + asset["url"])
+
+
+@contextmanager
+def release_archive(number, name, asset):
+    cache = os.environ.get("RH_RELEASE_CACHE_DIR")
+    if not cache and os.environ.get("RUNNER_ENVIRONMENT") == "self-hosted":
+        cache = Path(os.environ["RUNNER_TEMP"]).parent / "rh-release-cache"
+    if not cache:
+        with tempfile.TemporaryDirectory(dir=STATE) as tmp:
+            archive = Path(tmp) / "part.zst"
+            fetch_archive(number, name, asset, archive)
+            yield archive
+        return
+
+    import fcntl
+    import re
+    digest = asset["digest"]
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise ValueError(f"Invalid Release digest for {name}")
+    key = digest.removeprefix("sha256:")
+    directory = Path(cache) / key[:2]
+    directory.mkdir(parents=True, exist_ok=True)
+    archive = directory / (key + ".tar.zst")
+    with (directory / (key + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not (archive.is_file() and archive.stat().st_size == asset["size"] and sha256(archive) == key):
+            # Keep a partial download out of the cache until its Release digest matches.
+            partial = directory / (key + ".partial")
+            try:
+                fetch_archive(number, name, asset, partial)
+                partial.replace(archive)
+            finally:
+                partial.unlink(missing_ok=True)
+                partial.with_suffix(".zip").unlink(missing_ok=True)
+    yield archive
+
+
 def unpack(number, name, asset, required):
     BUILD.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=STATE) as tmp:
-        archive = Path(tmp) / "part.zst"
-        try:
-            run("curl", "--fail", "--location", "--silent", "--show-error", "--retry", "4",
-                "--retry-all-errors", "--retry-max-time", "300", "--output", str(archive), asset["url"])
-        except subprocess.CalledProcessError:
-            if not (os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GH_TOKEN")):
-                raise
-            download_ci_copy(number, name, asset, archive)
-        if "sha256:" + sha256(archive) != asset["digest"]:
-            raise ValueError("Release SHA-256 mismatch: " + asset["url"])
+    with release_archive(number, name, asset) as archive:
         with subprocess.Popen(["zstd", "-qdc", archive], stdout=subprocess.PIPE) as reader:
             with tarfile.open(fileobj=reader.stdout, mode="r|") as tar:
                 for entry in tar:
