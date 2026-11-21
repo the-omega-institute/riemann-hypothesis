@@ -25,7 +25,7 @@ Sutherland’s 09:30 UTC report still listed the end-to-end `lake comparator` ru
 
 ## Verify locally
 
-Use x86-64 Linux with Git, Python 3.12 or later, curl, zstd, and elan with its `lake` command on your PATH. Elan selects the pinned Lean 4.33.1 toolchain. Public Release downloads work without a GitHub account. The coverage command also works on macOS. [Install elan](https://lean-lang.org/install/)
+Use x86-64 Linux with Git, Python 3.12 or later, curl, zstd, and the `lake` command from Lean 4.33.1 on your PATH. You can install it with elan or use the pinned native Lean distribution. Public Release downloads work without a GitHub account. The coverage command also works on macOS. [Install elan](https://lean-lang.org/install/)
 
 ```sh
 git clone --depth 1 https://github.com/the-omega-institute/riemann-hypothesis.git
@@ -102,8 +102,8 @@ or set it when running `./verify` locally to share archives across clones.
 
 [![checks](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml)
 
-A [Comparator](https://github.com/leanprover/comparator) setup for the Lean formalization
-claiming a proof of the Riemann Hypothesis and of GRH for Dirichlet L-functions, announced on
+The upstream project supplies a [Comparator](https://github.com/leanprover/comparator) setup for Alpöge’s Lean formalization
+of the Riemann hypothesis and GRH for Dirichlet L-functions, announced on
 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
 The submission ships no challenge file that imports only Mathlib and no Comparator config.
