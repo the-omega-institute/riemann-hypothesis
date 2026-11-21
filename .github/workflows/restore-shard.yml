@@ -1,24 +1,87 @@
-name: Check a released module
-on:
-  workflow_dispatch:
-    inputs:
-      module:
-        description: Lean module to restore from published shards
-        type: string
-        required: true
-        default: BuildAid.D1
+name: Independent x64 build of shard 8467
+run-name: Build shard 8467 on the self-hosted x64 runner
+on: workflow_dispatch
 permissions: {contents: read, actions: read}
+env:
+  SOURCE: b8864ecd5798c6030a03d756fab95f0b89a12754
+  KEY: 62d74895bf288b2993d86c93c376e064a20b805bb7b7c1bf04e58bf3bbfa2b99
 jobs:
-  restore:
-    runs-on: ${{ vars.RH_LINUX_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 350
+  build:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 1440
+    steps:
+      - name: Record runner capacity
+        run: |
+          uname -m
+          nproc
+          free -h
+          df -hT .
+          for file in memory.max memory.swap.max cpu.max; do
+            if test -f "/sys/fs/cgroup/$file"; then cat "/sys/fs/cgroup/$file"; fi
+          done
+      - uses: actions/checkout@v4
+        with: {ref: '${{ env.SOURCE }}', persist-credentials: false}
+      - name: Ensure zstd is available for cache and shard extraction
+        shell: bash
+        run: |
+          if ! command -v zstd; then
+            dir=$(mktemp -d "$RUNNER_TEMP/rh-zstd.XXXXXX")
+            cd "$dir"
+            apt-get download zstd
+            dpkg-deb -x ./*.deb tools
+            echo "$dir/tools/usr/bin" >> "$GITHUB_PATH"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: .lake/parts
+          run-id: '44855916596'
+          github-token: '${{ github.token }}'
+      - uses: ./.github/actions/toolchain
+      - name: Restore prerequisites and build the pinned shard
+        env: {GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '3', PYTHONUNBUFFERED: '1'}
+        run: |
+          python3 - <<'PY'
+          import gzip, json, os
+          with gzip.open('.lake/parts/plan.json.gz') as file:
+              plan = json.load(file)
+          assert plan['head'] == os.environ['SOURCE']
+          assert plan['shards'][8467]['key'] == os.environ['KEY']
+          PY
+          (
+            while sleep 120; do
+              date -u
+              df -h .
+              free -h
+              ps -eo comm,stat,%cpu,rss,etime --sort=-rss | head -10 || true
+            done
+          ) &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true' EXIT
+          python3 ci/parts.py build 8467
+      - uses: actions/upload-artifact@v4
+        with:
+          name: part-8467
+          path: '${{ env.KEY }}.tar.zst'
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 2
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: {contents: write, actions: read}
     steps:
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
-        run: ./verify "$TARGET"
+        with: {ref: '${{ env.SOURCE }}', sparse-checkout: ci, persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: part-8467}
+      - name: Publish the shard if the hosted build has not published it
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/lean-parts-v1-${KEY:0:1}/$KEY.tar.zst"
+          status=$(curl -sSIL --retry 4 --retry-all-errors -o /dev/null -w '%{http_code}' "$url")
+          case "$status" in
+            200) echo 'The shard is already published.' ;;
+            404) python3 ci/parts.py publish "$KEY" "$SOURCE" ;;
+            *) echo "Release lookup returned $status" >&2; exit 1 ;;
+          esac
