@@ -66,7 +66,8 @@ external import available. Set the repository variable `RH_GROUP_SHARDS` to a
 JSON array of the selected shard numbers, then dispatch `early-groups.yml`
 with the shard's `number` and its full `key` from the plan. The workflow
 compiles independent groups in parallel and publishes each verified archive
-under a content-derived Release key. The parent shard restores those modules,
+under a content-derived Release key. A later group can restore these modules
+even while their parent shard is incomplete. The parent restores its groups,
 runs Lake's no-build check, and packages the full shard at its original key.
 The early workflow and the parent share a concurrency lock.
 
