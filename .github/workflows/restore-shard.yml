@@ -20,7 +20,7 @@ jobs:
             if test -f "/sys/fs/cgroup/$file"; then cat "/sys/fs/cgroup/$file"; fi
           done
       - uses: actions/checkout@v4
-        with: {ref: '${{ env.SOURCE }}', persist-credentials: false}
+        with: {ref: '${{ env.SOURCE }}', clean: false, persist-credentials: false}
       - name: Ensure zstd is available for cache and shard extraction
         shell: bash
         run: |
@@ -37,6 +37,16 @@ jobs:
           path: .lake/parts
           run-id: '44855916596'
           github-token: '${{ github.token }}'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Use Python 3.12 for verified tar extraction
+        env: {UV_PYTHON_INSTALL_DIR: '${{ runner.temp }}/rh-python'}
+        run: |
+          uv python install 3.12
+          interpreter=$(uv python find --managed-python 3.12)
+          "$interpreter" -c 'import tarfile; assert callable(tarfile.data_filter)'
+          dirname "$interpreter" >> "$GITHUB_PATH"
       - name: Select the pinned native Lean binaries
         shell: bash
         run: |
@@ -53,13 +63,20 @@ jobs:
           "$bin/lean" --version
           "$bin/lake" --version
           echo "$bin" >> "$GITHUB_PATH"
+      - name: Check Mathlib already restored in this pinned workspace
+        id: local-deps
+        run: |
+          if lake --no-build build +Mathlib.NumberTheory.LSeries.RiemannZeta:olean; then
+            echo 'hit=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Restore pinned Mathlib dependencies
+        if: steps.local-deps.outputs.hit != 'true'
         id: deps
         uses: actions/cache/restore@v4
         with:
           path: .lake/packages
           key: rh-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json') }}
-      - if: steps.deps.outputs.cache-hit != 'true'
+      - if: steps.local-deps.outputs.hit != 'true' && steps.deps.outputs.cache-hit != 'true'
         run: lake exe cache get
       - name: Restore prerequisites and build the pinned shard
         env: {GH_TOKEN: '${{ github.token }}', LEAN_NUM_THREADS: '3', PYTHONUNBUFFERED: '1'}
