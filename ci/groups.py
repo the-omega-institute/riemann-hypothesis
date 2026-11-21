@@ -34,7 +34,7 @@ def ready_groups(data, index, number, edges):
             key = group_key(shard["key"], modules)
             imports = {dep for module in modules for dep in edges[module]} - set(modules)
             if parts.asset_name(key) not in index and imports <= available:
-                result.append({"group": i, "key": key})
+                result.append({"number": number, "group": i, "key": key})
     return result
 
 
