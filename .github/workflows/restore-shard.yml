@@ -41,7 +41,11 @@ jobs:
         with:
           enable-cache: false
       - name: Use Python 3.12 for verified tar extraction
-        env: {UV_PYTHON_INSTALL_DIR: '${{ runner.temp }}/rh-python'}
+        env:
+          UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/rh-python
+          UV_CACHE_DIR: ${{ runner.temp }}/rh-uv-cache
+          UV_PYTHON_BIN_DIR: ${{ runner.temp }}/rh-python-bin
+          XDG_DATA_HOME: ${{ runner.temp }}/rh-uv-data
         run: |
           uv python install 3.12
           interpreter=$(uv python find --managed-python 3.12)
