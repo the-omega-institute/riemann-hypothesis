@@ -20,6 +20,13 @@ def module_groups(modules, edges):
     return sorted(sorted(group) for group in groups)
 
 
+def build_groups(modules, edges):
+    groups = module_groups(modules, edges)
+    # Existing connected groups retain their IDs. Individual modules can run when
+    # a different import of the same connected group is still missing.
+    return groups + [[m] for group in groups if len(group) > 1 for m in group]
+
+
 def group_key(parent, modules):
     return digest(["lean-module-group/v1", parent, *modules])
 
@@ -42,13 +49,21 @@ def complete_assemblies(inputs, index):
     return {number for number, names in inputs.items() if names and names.issubset(index)}
 
 
+def shard_archives(shard, index, edges):
+    covered = set()
+    for group_id, modules in enumerate(build_groups(shard["modules"], edges)):
+        if covered.issuperset(modules):
+            continue
+        name = parts.asset_name(group_key(shard["key"], modules))
+        if name in index:
+            covered.update(modules)
+            yield group_id, name, set(modules)
+
+
 def published_groups(data, index, edges):
     for number, shard in enumerate(data["shards"]):
-        if parts.asset_name(shard["key"]) in index:
-            continue
-        for group_id, modules in enumerate(module_groups(shard["modules"], edges)):
-            name = parts.asset_name(group_key(shard["key"], modules))
-            if name in index:
+        if parts.asset_name(shard["key"]) not in index:
+            for group_id, name, modules in shard_archives(shard, index, edges):
                 yield number, group_id, name, modules
 
 
@@ -80,10 +95,16 @@ def ready_groups(data, index, number, edges):
         available.update(modules)
     result = []
     if parts.asset_name(shard["key"]) not in index:
-        for i, modules in enumerate(module_groups(shard["modules"], edges)):
+        claimed = set()
+        for i, modules in enumerate(build_groups(shard["modules"], edges)):
+            if claimed.issuperset(modules):
+                continue
             key = group_key(shard["key"], modules)
             imports = {dep for module in modules for dep in edges[module]} - set(modules)
-            if parts.asset_name(key) not in index and imports <= available:
+            if parts.asset_name(key) in index:
+                claimed.update(modules)
+            elif imports <= available:
+                claimed.update(modules)
                 result.append({"number": number, "group": i, "key": key})
     return result
 
@@ -92,11 +113,7 @@ def reuse(data, number, edges, repo):
     shard = data["shards"][number]
     # The parent may have waited on the group workflow's concurrency lock after planning.
     index = parts.inventory(repo)
-    found = []
-    for i, modules in enumerate(module_groups(shard["modules"], edges)):
-        name = parts.asset_name(group_key(shard["key"], modules))
-        if name in index:
-            found.append((i, name, set(modules)))
+    found = list(shard_archives(shard, index, edges))
     prebuilt = {m for _, _, modules in found for m in modules}
     if prebuilt:
         imports = {dep for m in prebuilt for dep in edges[m]} - prebuilt
@@ -132,11 +149,10 @@ def main():
             print("matrix=" + json.dumps(selected), file=file)
     elif command == "build":
         group, key = args
-        modules = module_groups(shard["modules"], edges)[int(group)]
+        modules = build_groups(shard["modules"], edges)[int(group)]
         if key != group_key(shard["key"], modules):
             raise ValueError("Group key does not match the source plan")
-        imports = {dep for m in modules for dep in edges[m]} - set(modules)
-        install_partial_imports(data, index, imports, edges)
+        install_partial_imports(data, index, modules, edges)
         data["shards"][number] = dict(shard, modules=modules, key=key)
         parts.build(data, index, number)
     else:
