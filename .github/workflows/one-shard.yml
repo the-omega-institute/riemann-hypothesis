@@ -53,6 +53,7 @@ jobs:
         env: {PART: '${{ inputs.number }}', GH_TOKEN: '${{ github.token }}'}
         run: python3 .rh-ci/ci/groups.py reuse "$PART"
       - id: build
+        name: Build Lean targets and verify the shard archive
         if: steps.lookup.outputs.hit == 'false'
         env:
           PART: ${{ inputs.number }}

@@ -12,7 +12,7 @@ import tarfile
 import time
 import tempfile
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 
 from plan import graph, plan
 
@@ -259,34 +259,78 @@ def restore(data, index, modules, edges=None, *, allow_missing=False):
             unpack(number, name, asset, needed)
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text("\n".join(sorted(installed | needed)))
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        jobs = ((i, s) for i, s in enumerate(data["shards"]) if not wanted.isdisjoint(s["modules"]))
-        list(pool.map(restore_one, jobs))
 
+    shards = [(i, s) for i, s in enumerate(data["shards"]) if not wanted.isdisjoint(s["modules"])]
+    ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        if not ci:
+            list(pool.map(restore_one, shards))
+            return
+        print(f"Restoring {len(wanted)} required modules across {len(shards)} shards", flush=True)
+        pending = {pool.submit(restore_one, shard) for shard in shards}
+        while pending:
+            done, pending = wait(pending, timeout=60, return_when=FIRST_EXCEPTION)
+            for task in done:
+                task.result()
+            print(f"Restore checked {len(shards) - len(pending)}/{len(shards)} shards", flush=True)
+
+
+def run_lake_ci(args, label):
+    print(label, flush=True)
+    started = time.monotonic()
+    with subprocess.Popen(args) as process:
+        while True:
+            try:
+                code = process.wait(timeout=60)
+                break
+            except subprocess.TimeoutExpired:
+                elapsed = int(time.monotonic() - started)
+                print(f"{label} — {elapsed}s elapsed", flush=True)
+                # Sample only Lake and its immediate workers. CPU time is cumulative.
+                try:
+                    sample = subprocess.run([
+                        "ps", "-p", str(process.pid), "--ppid", str(process.pid),
+                        "--sort=-rss", "-o", "pid,stat,time,rss,comm",
+                    ], capture_output=True, text=True, timeout=5)
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+                if sample.returncode == 0:
+                    print("\n".join(sample.stdout.splitlines()[:7]), flush=True)
+        if code:
+            raise subprocess.CalledProcessError(code, args)
 
 
 def lake(modules, reuse=False):
     if not modules:
         return
-    options = []
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        action = "Checking released outputs for" if reuse else "Building"
-        print(f"{action} {len(modules)} Lean module(s)", flush=True)
-        # A successful replay can print hundreds of MB of cached linter warnings.
-        options.extend(["--quiet", "--log-level=error"])
+    args = ["lake"]
+    ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    if ci:
+        # Plain progress reports newly built targets. Cached linter warnings stay muted.
+        args.extend(["--no-ansi", "--log-level=error"])
     if reuse:
-        options.append("--no-build")
-    run("lake", *options, "build", *["+" + m + ":olean" for m in sorted(modules)])
+        args.append("--no-build")
+    args.append("build")
+    args.extend("+" + m + ":olean" for m in sorted(modules))
+    if ci:
+        action = "Checking released outputs for" if reuse else "Building"
+        run_lake_ci(args, f"{action} {len(modules)} Lean module(s)")
+    else:
+        run(*args)
 
 
 def build(data, index, number):
     shard = data["shards"][number]
     mods = set(shard["modules"])
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"Reading the import graph for shard {number}", flush=True)
     _, edges = graph()
     imports = {d for m in mods for d in edges[m]} - mods
     restore(data, index, imports, edges)
     lake(imports, reuse=True)
     lake(mods)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"Packaging {len(mods)} modules for shard {number} and checking the archive with Lake", flush=True)
     archive = Path(asset_name(shard["key"])).resolve()
     paths = []
     for mod in sorted(mods):
