@@ -91,6 +91,12 @@ A runner service can set `LEAN_NUM_THREADS` to override this default. Toolchain
 setup logs both counts. Lake can schedule independent imports together. A
 module starts compiling once its prerequisites are ready.
 
+In a shard job, expand **Build Lean targets and verify the shard archive**.
+The log counts checked Release shards, prints Lake's completed build targets
+and marks archive packaging. During a long Lake command, a sample each minute
+shows elapsed time and samples CPU time and memory from Lake and its direct workers.
+The coordinator's `plan` job records the number of whole shards published.
+
 The runner keeps the pinned native Lean toolchain and Python under
 `_work/rh-tools/`. Actions caches Mathlib separately by toolchain and package
 manifest. If a Release download exhausts its retries, CI can recover the same
