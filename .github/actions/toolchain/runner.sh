@@ -5,7 +5,11 @@ tools="$(dirname "$RUNNER_TEMP")/rh-tools"
 mkdir -p "$tools"
 config=$(mktemp -d "$RUNNER_TEMP/rh-gh.XXXXXX")
 export GH_CONFIG_DIR="$config"
+runner_cpus=$(nproc)
+lake_threads=${LEAN_NUM_THREADS:-$runner_cpus}
+printf 'Runner reports %s available CPUs. Lake uses %s task threads.\n' "$runner_cpus" "$lake_threads"
 {
+  echo "LEAN_NUM_THREADS=$lake_threads"
   echo "GH_CONFIG_DIR=$config"
   echo "XDG_CACHE_HOME=$tools/cache"
   echo "UV_PYTHON_BIN_DIR=$tools/bin"
