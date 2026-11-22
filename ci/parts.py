@@ -266,9 +266,17 @@ def restore(data, index, modules, edges=None, *, allow_missing=False):
 
 
 def lake(modules, reuse=False):
-    if modules:
-        run("lake", *(["--no-build"] if reuse else []), "build",
-            *["+" + m + ":olean" for m in sorted(modules)])
+    if not modules:
+        return
+    options = []
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        action = "Checking released outputs for" if reuse else "Building"
+        print(f"{action} {len(modules)} Lean module(s)", flush=True)
+        # A successful replay can print hundreds of MB of cached linter warnings.
+        options.extend(["--quiet", "--log-level=error"])
+    if reuse:
+        options.append("--no-build")
+    run("lake", *options, "build", *["+" + m + ":olean" for m in sorted(modules)])
 
 
 def build(data, index, number):
