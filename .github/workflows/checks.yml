@@ -38,9 +38,12 @@ jobs:
 
   challenge:
     name: Challenge compiles against Mathlib alone
-    runs-on: ubuntu-latest
+    # Fork PRs receive the hosted source comparison. Their Lean runs upon merge.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
+        with: {persist-credentials: false}
       - uses: ./.github/actions/toolchain
       - name: Build only the Challenge module
         run: lake build Challenge

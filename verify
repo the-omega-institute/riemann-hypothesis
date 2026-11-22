@@ -70,11 +70,19 @@ def main():
         parser.exit(2, "Some shards are still building. Retry later or use --build-missing to compile the remainder.\n")
     if platform.system() != "Linux" or platform.machine().lower() not in {"x86_64", "amd64"}:
         parser.exit(2, "The published binaries require x86-64 Linux. Use an x86-64 Linux environment for verification.\n")
-    for tool in ("elan", "lake", "curl", "zstd"):
+    for tool in ("lake", "curl", "zstd"):
         if not shutil.which(tool):
             parser.exit(2, f"Install {tool} and retry. See the prerequisites in README.md.\n")
-    os.environ["ELAN_TOOLCHAIN"] = (ROOT / "lean-toolchain").read_text().strip()
-    run("lake", "--version")
+    toolchain = (ROOT / "lean-toolchain").read_text().strip()
+    os.environ["ELAN_TOOLCHAIN"] = toolchain
+    lake_version = subprocess.check_output(["lake", "--version"], text=True).strip()
+    print(lake_version, flush=True)
+    if toolchain.startswith("leanprover/lean4:v"):
+        version = toolchain.removeprefix("leanprover/lean4:v")
+        if f"(Lean version {version})" not in lake_version:
+            parser.exit(2, f"Use the Lake binary for {toolchain}. See the prerequisites in README.md.\n")
+    elif not shutil.which("elan"):
+        parser.exit(2, f"Install elan to select {toolchain}.\n")
     run("lake", "exe", "cache", "get")
     STATE.mkdir(parents=True, exist_ok=True)
     restore(data, index, modules, source[1], allow_missing=args.build_missing)

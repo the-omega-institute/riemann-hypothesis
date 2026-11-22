@@ -1,6 +1,6 @@
 # Riemann hypothesis · reproducible Lean builds
 
-Levent Alpöge released Lean source for a claimed proof of the Riemann hypothesis and GRH for Dirichlet L-functions. **The Omega Institute builds and distributes that source in reusable pieces so others can check it on their own machines.** Deicyde mirrored the original archive and supplied the independent Comparator challenge. The proof declarations are in `src/Main.lean`. [Author’s announcement](https://alpo.ge/remark.pdf) · [Upstream verification project](https://github.com/Deicyde/riemann-hypothesis) · [Main.lean](src/Main.lean)
+Levent Alpöge proved the Riemann hypothesis in Lean. His library also contains results on zeros of Dirichlet L-functions. **The Omega Institute builds and distributes that source in reusable pieces so others can check it on their own machines.** Deicyde mirrored the original archive and supplied the independent Comparator challenge. The proof declarations are in `src/Main.lean`. [Author’s announcement](https://alpo.ge/remark.pdf) · [Upstream verification project](https://github.com/Deicyde/riemann-hypothesis) · [Main.lean](src/Main.lean)
 
 ## Companion book
 
@@ -10,7 +10,9 @@ The Omega Institute’s *Symmetry on the Critical Line: How the Riemann Hypothes
 
 ## Public kernel replay results
 
-By 21 November 2026, public reports recorded successful kernel checks of the five declarations in `Main.lean`, covering Mathlib’s Riemann hypothesis and the corresponding results for Dirichlet L-functions. The published axiom audit lists only `propext`, `Classical.choice`, and `Quot.sound` for each declaration. [Five-theorem audit](https://math.mit.edu/~drew/grh/audit.log)
+On 21 November 2026 the Lean and Mathlib communities certified Alpöge’s proof of Mathlib’s `RiemannHypothesis`. Their joint statement, endorsed by the Lean FRO and the Mathlib Initiative, reports that both Comparator and con-leche matched the proved theorem to the Mathlib statement. [Joint statement](https://leanprover-community.github.io/blog/posts/riemann-hypothesis/)
+
+Independent reports recorded successful kernel checks of the five declarations in `Main.lean`, covering Mathlib’s Riemann hypothesis and the corresponding results for Dirichlet L-functions. The published axiom audit lists only `propext`, `Classical.choice`, and `Quot.sound` for each declaration. [Five-theorem audit](https://math.mit.edu/~drew/grh/audit.log)
 
 | Public run | Input and result | Primary evidence |
 |---|---|---|
@@ -23,7 +25,7 @@ Sutherland’s 09:30 UTC report still listed the end-to-end `lake comparator` ru
 
 ## Verify locally
 
-Use x86-64 Linux with Git, Python 3.12 or later, curl, zstd, and elan with its `lake` command on your PATH. Elan selects the pinned Lean 4.33.1 toolchain. Public Release downloads work without a GitHub account. The coverage command also works on macOS. [Install elan](https://lean-lang.org/install/)
+Use x86-64 Linux with Git, Python 3.12 or later, curl, zstd, and the `lake` command from Lean 4.33.1 on your PATH. You can install it with elan or use the pinned native Lean distribution. Public Release downloads work without a GitHub account. The coverage command also works on macOS. [Install elan](https://lean-lang.org/install/)
 
 ```sh
 git clone --depth 1 https://github.com/the-omega-institute/riemann-hypothesis.git
@@ -54,7 +56,7 @@ minute and dispatches it across independent Actions matrices. Each completed
 shard publishes immediately. The first 17 compilation keys are retained from
 the initial run. On this source tree there are 8,490 shards, 36 dependency
 levels and 529 independently eligible jobs immediately after the foundations.
-GitHub allocates the available runners. Longer remaining paths to Main are
+Jobs run as matching self-hosted workers become available. Longer remaining paths to Main are
 dispatched first. A single active workflow per shard hash and a Release lookup
 before toolchain installation let overlapping runs reuse completed work.
 The coordinator retries missing parts, rolls over before the hosted job time
@@ -65,7 +67,7 @@ Near the end of a build, some modules in a blocked shard already have every
 external import available. Set the repository variable `RH_GROUP_SHARDS` to a
 JSON array of the selected shard numbers, then dispatch `early-groups.yml`
 with the shard's `number` and its full `key` from the plan. The workflow
-compiles independent groups in parallel and publishes each verified archive
+queues independent groups for the available workers and publishes each verified archive
 under a content-derived Release key. A later group can restore these modules
 even while their parent shard is incomplete. When a connected group has an
 unavailable import, the workflow publishes any individual members whose imports
@@ -78,29 +80,30 @@ Its filename includes the SHA-256 of the independent archive. CI and `./verify`
 select the assembled archive so downstream Lake traces see the original group outputs.
 The early workflow and the parent share a concurrency lock.
 
-Actions caches elan and the pinned Lean toolchain by operating system,
-architecture, and the contents of `lean-toolchain`. A cold runner saves
-the installation as soon as `lean --version` succeeds. Mathlib has a
-separate cache keyed by the toolchain and package manifest. If a Release
-download exhausts its retries, CI can recover the same shard from the original
-build artifact during its one-day retention and verify the Release SHA-256.
+Each compiler job uses a self-hosted Linux x86-64 runner. Shards, early groups,
+module replays, the Challenge check and the final five-theorem audit all use the
+same runner labels. Planning, source comparison and Release uploads run on
+GitHub-hosted workers. Pull requests from forks receive the source comparison,
+and the merged revision receives the self-hosted Challenge check.
+
+The runner keeps the pinned native Lean toolchain and Python under
+`_work/rh-tools/`. Actions caches Mathlib separately by toolchain and package
+manifest. If a Release download exhausts its retries, CI can recover the same
+shard from the original build artifact during its one-day retention and verify
+the Release SHA-256.
 Self-hosted runners keep verified Release archives in `rh-release-cache/` next
 to the runner's temporary directory (typically `_work/rh-release-cache/`).
 Fresh checkouts share the files on that machine. Each restore verifies the
 archive against the published SHA-256 and downloads a replacement if needed.
 Set `RH_RELEASE_CACHE_DIR` in the runner environment to use a mounted disk,
 or set it when running `./verify` locally to share archives across clones.
-Standard hosted jobs that restore at least 80,000 project modules use a
-zstd-compressed Btrfs build directory when free disk space is below 128 GiB.
-The default runner is Ubuntu 24.04 x86-64. The repository variable
-`RH_LINUX_RUNNER` can select a Linux x86-64 runner with more memory or disk.
 
 ## Upstream verification project
 
 [![checks](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml/badge.svg)](https://github.com/Deicyde/riemann-hypothesis/actions/workflows/checks.yml)
 
-A [Comparator](https://github.com/leanprover/comparator) setup for the Lean formalization
-claiming a proof of the Riemann Hypothesis and of GRH for Dirichlet L-functions, announced on
+The upstream project supplies a [Comparator](https://github.com/leanprover/comparator) setup for Alpöge’s Lean formalization
+of the Riemann hypothesis and GRH for Dirichlet L-functions, announced on
 2026-11-20 at <https://alpo.ge/remark.pdf>.
 
 The submission ships no challenge file that imports only Mathlib and no Comparator config.
