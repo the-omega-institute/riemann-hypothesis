@@ -86,6 +86,11 @@ same runner labels. Planning, source comparison and Release uploads run on
 GitHub-hosted workers. Pull requests from forks receive the source comparison,
 and the merged revision receives the self-hosted Challenge check.
 
+CI sets Lake's task thread count to the available CPU count reported by `nproc`.
+A runner service can set `LEAN_NUM_THREADS` to override this default. Toolchain
+setup logs both counts. Lake can schedule independent imports together. A
+module starts compiling once its prerequisites are ready.
+
 The runner keeps the pinned native Lean toolchain and Python under
 `_work/rh-tools/`. Actions caches Mathlib separately by toolchain and package
 manifest. If a Release download exhausts its retries, CI can recover the same

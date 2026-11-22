@@ -20,5 +20,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET: ${{ inputs.module }}
-          LEAN_NUM_THREADS: '3'
         run: ./verify "$TARGET"
