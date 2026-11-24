@@ -23,28 +23,57 @@ jobs:
           test "$(git rev-parse HEAD:lakefile.toml)" = 7fb51422cf263fbaa82975612a975ea6b3bb5261
           df -h .
       - uses: ./.github/actions/toolchain
-      - name: Restore the matching published import closure
+      - name: Restore and check the exact import closure
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 -B - <<'RESTORE'
+          lake env python3 -B - <<'NATIVE'
           import os
+          from pathlib import Path
+          import subprocess
           import sys
           sys.path.insert(0, "ci")
-          from parts import STATE, asset_name, dependencies, graph, inventory, lake, plan, restore
-          target = {"Development.AutomorphicArithmetic.CharacterBoxes.MainConclusion"}
+          from parts import BUILD, STATE, dependencies, graph, inventory, plan, restore
+
+          targets = {"Development.AutomorphicArithmetic.CharacterBoxes.MainConclusion"}
           project = graph()
+          edges = project[1]
           data = plan(project)
-          index = inventory(os.environ["GITHUB_REPOSITORY"])
-          wanted = dependencies(target, project[1])
-          shards = [s for s in data["shards"] if not wanted.isdisjoint(s["modules"])]
-          missing = [s["key"] for s in shards if asset_name(s["key"]) not in index]
-          if missing:
-              sys.exit(f"Waiting for {len(missing)} original release shards: {missing}")
+          wanted = dependencies(targets, edges)
           STATE.mkdir(parents=True, exist_ok=True)
-          restore(data, index, target, project[1])
-          lake(target, reuse=True)
-          RESTORE
+          restore(data, inventory(os.environ["GITHUB_REPOSITORY"]), targets, edges,
+                  allow_missing=True)
+
+          def stem(module):
+              return Path(*module.split("."))
+
+          def artifact(module):
+              return BUILD / "lib/lean" / stem(module).with_suffix(".olean")
+
+          pending = {module for module in wanted if not artifact(module).is_file()}
+          print(f"Missing after digest-checked restore: {len(pending)} modules", flush=True)
+          options = ["-j1", "--root=src", "--tstack=400000", "-DautoImplicit=false",
+                     "-DrelaxedAutoImplicit=false", "-DmaxSynthPendingDepth=3",
+                     "-Dpp.unicode.fun=true", "-DmaxHeartbeats=4000000"]
+          while pending:
+              ready = sorted(module for module in pending
+                             if pending.isdisjoint(edges[module]))
+              if not ready:
+                  sys.exit(f"Missing dependency cycle: {sorted(pending)}")
+              for module in ready:
+                  lib = artifact(module)
+                  ir = BUILD / "ir" / stem(module).with_suffix(".c")
+                  lib.parent.mkdir(parents=True, exist_ok=True)
+                  ir.parent.mkdir(parents=True, exist_ok=True)
+                  print(f"Elaborating {module}", flush=True)
+                  subprocess.run(["lean", *options, "-o", str(lib),
+                                  "-i", str(lib.with_suffix(".ilean")), "-c", str(ir),
+                                  str(Path("src") / stem(module).with_suffix(".lean"))],
+                                 check=True, timeout=3600)
+                  if not lib.is_file():
+                      sys.exit(f"Lean exited without creating {lib}")
+                  pending.remove(module)
+          NATIVE
       - name: Elaborate the pure zeta extraction and print its axioms
         run: |
           set -euo pipefail
