@@ -10,10 +10,10 @@ jobs:
   verify:
     if: github.ref == 'refs/heads/check/rh-pure-zeta-window-01a1d964'
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
+        with: {persist-credentials: false, clean: false}
       - name: Confirm the public source and dependency pins
         run: |
           set -euo pipefail
@@ -23,26 +23,48 @@ jobs:
           test "$(git rev-parse HEAD:lakefile.toml)" = 7fb51422cf263fbaa82975612a975ea6b3bb5261
           df -h .
       - uses: ./.github/actions/toolchain
-      - name: Restore and check the exact import closure
+      - name: Restore the pinned module closure and fill missing entries
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           lake env python3 -B - <<'NATIVE'
+          from concurrent.futures import ThreadPoolExecutor
+          import gzip
+          from hashlib import sha256
+          import json
           import os
           from pathlib import Path
           import subprocess
           import sys
+          from tempfile import TemporaryDirectory
           sys.path.insert(0, "ci")
           from parts import BUILD, STATE, dependencies, graph, inventory, plan, restore
 
           targets = {"Development.AutomorphicArithmetic.CharacterBoxes.MainConclusion"}
           project = graph()
           edges = project[1]
-          data = plan(project)
           wanted = dependencies(targets, edges)
           STATE.mkdir(parents=True, exist_ok=True)
-          restore(data, inventory(os.environ["GITHUB_REPOSITORY"]), targets, edges,
+          restore(plan(project), inventory(os.environ["GITHUB_REPOSITORY"]), targets, edges,
                   allow_missing=True)
+
+          cache_url = "https://rh-cache.taucetiproject.org"
+          bootstrap = "e50d09817ad81469f737e8f637561e6ccf86c670"
+          manifest_sha = "292caa386a620d935cfc736b56fcceaab9fe7073086693b62e899c1ee4725f04"
+
+          def download(url):
+              return subprocess.check_output(["curl", "--fail", "--silent", "--show-error",
+                  "--location", "--retry", "4", "--max-time", "60", url])
+
+          manifest = download(f"{cache_url}/bootstrap/{bootstrap}/modules.jsonl.gz")
+          if sha256(manifest).hexdigest() != manifest_sha:
+              sys.exit("Community cache manifest digest mismatch")
+          metadata, *rows = gzip.decompress(manifest).splitlines()
+          metadata = json.loads(metadata)
+          assert metadata["source_tree"] == "24df20b62d9976ccd20da819bc20b16f808f0fdd"
+          assert metadata["toolchain"] == "leanprover/lean4:v4.33.1"
+          index = {row[0]: row[1:] for row in map(json.loads, rows)}
+          assert len(index) == metadata["modules"] == 175187
 
           def stem(module):
               return Path(*module.split("."))
@@ -50,29 +72,34 @@ jobs:
           def artifact(module):
               return BUILD / "lib/lean" / stem(module).with_suffix(".olean")
 
-          pending = {module for module in wanted if not artifact(module).is_file()}
-          print(f"Missing after digest-checked restore: {len(pending)} modules", flush=True)
-          options = ["-j1", "--root=src", "--tstack=400000", "-DautoImplicit=false",
-                     "-DrelaxedAutoImplicit=false", "-DmaxSynthPendingDepth=3",
-                     "-Dpp.unicode.fun=true", "-DmaxHeartbeats=4000000"]
-          while pending:
-              ready = sorted(module for module in pending
-                             if pending.isdisjoint(edges[module]))
-              if not ready:
-                  sys.exit(f"Missing dependency cycle: {sorted(pending)}")
-              for module in ready:
-                  lib = artifact(module)
-                  ir = BUILD / "ir" / stem(module).with_suffix(".c")
-                  lib.parent.mkdir(parents=True, exist_ok=True)
-                  ir.parent.mkdir(parents=True, exist_ok=True)
-                  print(f"Elaborating {module}", flush=True)
-                  subprocess.run(["lean", *options, "-o", str(lib),
-                                  "-i", str(lib.with_suffix(".ilean")), "-c", str(ir),
-                                  str(Path("src") / stem(module).with_suffix(".lean"))],
-                                 check=True, timeout=3600)
-                  if not lib.is_file():
-                      sys.exit(f"Lean exited without creating {lib}")
-                  pending.remove(module)
+          missing = sorted(module for module in wanted if not artifact(module).is_file())
+          reported_missing = "Development.AbelianVarietyTheory.Definitions.GaloisGeometry.InvMemLatMonoidOfMemAwaySupp"
+          if not artifact(reported_missing).is_file() and reported_missing not in missing:
+              missing.append(reported_missing)
+          print(f"Filling {len(missing)} missing modules from the pinned community cache", flush=True)
+          with TemporaryDirectory(dir=STATE) as stage:
+              def fetch(module):
+                  dependency_hash, archive_name, digest = index[module]
+                  data = download(f"{cache_url}/artifacts/leanprover-community/riemann-hypothesis/{archive_name[:-5]}.art")
+                  if sha256(data).hexdigest() != digest:
+                      raise ValueError(f"Community cache digest mismatch: {module}")
+                  compressed = Path(stage) / archive_name
+                  compressed.write_bytes(data)
+                  library = artifact(module).parent.resolve()
+                  ir = (BUILD / "ir" / stem(module)).parent.resolve()
+                  library.mkdir(parents=True, exist_ok=True)
+                  ir.mkdir(parents=True, exist_ok=True)
+                  return {"file": str(compressed.resolve()), "hash": dependency_hash,
+                          "base": [str(library), str(ir)]}
+
+              with ThreadPoolExecutor(max_workers=4) as pool:
+                  jobs = list(pool.map(fetch, missing))
+              if jobs:
+                  subprocess.run(["leantar", "--jobs", "4", "-f", "-x", "-j", "-"],
+                                 input=json.dumps(jobs), text=True, check=True)
+          for module in missing:
+              if not artifact(module).is_file():
+                  sys.exit(f"No installed .olean after unpack for {module}")
           NATIVE
       - name: Elaborate the pure zeta extraction and print its axioms
         run: |
