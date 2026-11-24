@@ -1,23 +1,69 @@
-name: Check a released module
+name: Check the pure zeta window extraction
 on:
   workflow_dispatch:
     inputs:
       module:
-        description: Lean module to restore from published shards
         type: string
-        required: true
-        default: BuildAid.D1
+        default: Development.AutomorphicArithmetic.CharacterBoxes.MainConclusion
 permissions: {contents: read, actions: read}
 jobs:
-  restore:
+  verify:
+    if: github.ref == 'refs/heads/check/rh-pure-zeta-window-01a1d964'
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 1440
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
+      - name: Confirm the public source and dependency pins
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:src)" = 24df20b62d9976ccd20da819bc20b16f808f0fdd
+          test "$(git rev-parse HEAD:lean-toolchain)" = a8afa7d1b02d96f0671eba854a8dc4b416beb473
+          test "$(git rev-parse HEAD:lake-manifest.json)" = b4d1ec31575a26b2159ec3a262b482bc051f3f6f
+          test "$(git rev-parse HEAD:lakefile.toml)" = 7fb51422cf263fbaa82975612a975ea6b3bb5261
+          df -h .
       - uses: ./.github/actions/toolchain
-      - name: Restore from public Releases and replay the module with the Lean kernel
+      - name: Restore the matching published import closure
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET: ${{ inputs.module }}
-        run: ./verify "$TARGET"
+        run: |
+          python3 -B - <<'RESTORE'
+          import os
+          import sys
+          sys.path.insert(0, "ci")
+          from parts import STATE, asset_name, dependencies, graph, inventory, lake, plan, restore
+          target = {"Development.AutomorphicArithmetic.CharacterBoxes.MainConclusion"}
+          project = graph()
+          data = plan(project)
+          index = inventory(os.environ["GITHUB_REPOSITORY"])
+          wanted = dependencies(target, project[1])
+          shards = [s for s in data["shards"] if not wanted.isdisjoint(s["modules"])]
+          missing = [s["key"] for s in shards if asset_name(s["key"]) not in index]
+          if missing:
+              sys.exit(f"Waiting for {len(missing)} original release shards: {missing}")
+          STATE.mkdir(parents=True, exist_ok=True)
+          restore(data, index, target, project[1])
+          lake(target, reuse=True)
+          RESTORE
+      - name: Elaborate the pure zeta extraction and print its axioms
+        run: |
+          set -euo pipefail
+          lean --version
+          lake env lean -j1 \
+            -o "$RUNNER_TEMP/AlpogePureZetaWindowExtraction.olean" \
+            verification/AlpogePureZetaWindowExtraction.lean | tee "$RUNNER_TEMP/pure-zeta-window-lean.log"
+          python3 - "$RUNNER_TEMP/pure-zeta-window-lean.log" <<'AXIOMS'
+          from pathlib import Path
+          import re
+          import sys
+          text = Path(sys.argv[1]).read_text()
+          match = re.search(r"'PureZetaWindowExtraction\.pure_zeta_windows' depends on axioms: \[([^]]*)\]", text)
+          if match is None or set(map(str.strip, match.group(1).split(","))) != {"propext", "Classical.choice", "Quot.sound"}:
+              raise SystemExit("Missing or unexpected pure zeta axiom report")
+          AXIOMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pure-zeta-window-lean-log
+          path: ${{ runner.temp }}/pure-zeta-window-lean.log
+          if-no-files-found: ignore
