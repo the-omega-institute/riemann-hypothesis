@@ -1,4 +1,4 @@
-name: Check the pure zeta window extraction
+name: Check the RH proof via pure zeta windows
 on:
   workflow_dispatch:
     inputs:
@@ -101,25 +101,47 @@ jobs:
               if not artifact(module).is_file():
                   sys.exit(f"No installed .olean after unpack for {module}")
           NATIVE
-      - name: Elaborate the pure zeta extraction and print its axioms
+      - name: Elaborate the window estimate and the composed RH theorem
         run: |
           set -euo pipefail
           lean --version
-          lake env lean -j1 \
-            -o "$RUNNER_TEMP/AlpogePureZetaWindowExtraction.olean" \
-            verification/AlpogePureZetaWindowExtraction.lean | tee "$RUNNER_TEMP/pure-zeta-window-lean.log"
-          python3 - "$RUNNER_TEMP/pure-zeta-window-lean.log" <<'AXIOMS'
+          ulimit -Sn 65536
+          out="$RUNNER_TEMP/pure-zeta-lean"
+          mkdir -p "$out/Verification"
+          export LEAN_PATH="$out:$(lake env printenv LEAN_PATH)"
+          for module in GeneralLaplaceMoments CriticalGammaWindow PairedLaplacePoleWindow \
+              RiemannZetaPositiveRealSign EqualRadiusZeroDisks RightHalfStripRiemannReduction \
+              AlpogePureZetaGammaBridge; do
+            lean -j1 --root=verification -o "$out/Verification/$module.olean" \
+              "verification/Verification/$module.lean"
+          done 2>&1 | tee "$RUNNER_TEMP/pure-zeta-analytic-lean.log"
+          lean -j1 --root=verification -o "$out/AlpogePureZetaWindowExtraction.olean" \
+            verification/AlpogePureZetaWindowExtraction.lean 2>&1 | tee "$RUNNER_TEMP/pure-zeta-window-lean.log"
+          lean -j1 --root=verification -o "$out/AlpogePureZetaGammaRH.olean" \
+            verification/AlpogePureZetaGammaRH.lean 2>&1 | tee "$RUNNER_TEMP/pure-zeta-composed-lean.log"
+          python3 - "$RUNNER_TEMP" <<'AXIOMS'
           from pathlib import Path
           import re
           import sys
-          text = Path(sys.argv[1]).read_text()
-          match = re.search(r"'PureZetaWindowExtraction\.pure_zeta_windows' depends on axioms: \[([^]]*)\]", text)
-          if match is None or set(map(str.strip, match.group(1).split(","))) != {"propext", "Classical.choice", "Quot.sound"}:
-              raise SystemExit("Missing or unexpected pure zeta axiom report")
+          logs = Path(sys.argv[1])
+          declarations = {
+              "pure-zeta-window-lean.log": ["PureZetaWindowExtraction.pure_zeta_windows"],
+              "pure-zeta-analytic-lean.log": ["PureZetaGammaBridge.signed_peaks",
+                  "PureZetaGammaBridge.rh_of_pure_zeta_windows"],
+              "pure-zeta-composed-lean.log": ["omega_riemannHypothesis_from_pure_zeta_windows"],
+          }
+          for log, names in declarations.items():
+              text = (logs / log).read_text()
+              for name in names:
+                  match = re.search(rf"'{re.escape(name)}' depends on axioms:\s*\[([^]]*)\]", text)
+                  if match is None or set(map(str.strip, match.group(1).split(","))) != {
+                      "propext", "Classical.choice", "Quot.sound"}:
+                      raise SystemExit(f"Missing or unexpected axiom report for {name}")
           AXIOMS
+          leanchecker AlpogePureZetaGammaRH 2>&1 | tee "$RUNNER_TEMP/pure-zeta-composed-replay.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pure-zeta-window-lean-log
-          path: ${{ runner.temp }}/pure-zeta-window-lean.log
+          name: pure-zeta-composed-evidence
+          path: ${{ runner.temp }}/pure-zeta-*.log
           if-no-files-found: ignore
