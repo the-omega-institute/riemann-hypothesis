@@ -13,11 +13,9 @@ private theorem cyc_one_Gm (x : ℝ) : (Level.cyc PChar.one).Gm x = Formalism.Gz
   classical
   have hmem (ψ : PChar) (hψ : ψ ∈ (Level.cyc PChar.one).KEPT) : ψ = PChar.one := by
     rw [Level.cyc, Level.mem_ofSub] at hψ
-    obtain ⟨χ, hχ, heq⟩ := hψ
-    change χ ∈ Subgroup.zpowers (1 : DirichletCharacter ℂ 1) at hχ
-    rw [Subgroup.zpowers_one_eq_bot, Subgroup.mem_bot] at hχ
-    subst χ
-    exact heq.symm.trans (PChar.of_one 1)
+    obtain ⟨χ, _, heq⟩ := hψ
+    have hχ : χ = 1 := DirichletCharacter.level_one (show DirichletCharacter ℂ 1 from χ)
+    exact heq.symm.trans ((congrArg PChar.of hχ).trans (PChar.of_one PChar.one.N))
   have hNt : (Level.cyc PChar.one).Nt = ∅ := by
     apply Finset.eq_empty_iff_forall_notMem.mpr
     intro ψ hψ

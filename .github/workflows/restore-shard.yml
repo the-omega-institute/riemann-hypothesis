@@ -132,6 +132,11 @@ jobs:
               imports + "\nimport Verification.AlpogePureZetaGammaBridge\n\n" + body +
               "\nend\n\n" + terminal_body)
           COMPOSE
+          free -h
+          df -h .
+          ulimit -n
+          sysctl vm.max_map_count
+          echo "Loading the frozen import closure and checking both declarations"
           /usr/bin/time -v lean -j1 --tstack=400000 --root="$out" \
             -o "$out/AlpogePureZetaGammaRH.olean" "$out/AlpogePureZetaGammaRH.lean" \
             2>&1 | tee "$RUNNER_TEMP/pure-zeta-composed-lean.log"
