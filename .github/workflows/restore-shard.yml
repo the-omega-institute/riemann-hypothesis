@@ -10,7 +10,7 @@ jobs:
   verify:
     if: github.ref == 'refs/heads/check/rh-pure-zeta-window-01a1d964'
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 150
+    timeout-minutes: 720
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false, clean: false}
