@@ -1,6 +1,6 @@
 # Riemann hypothesis · reproducible Lean builds
 
-The recommended repository for reading and building the Lean 4 proof of RH and Dirichlet GRH is [lsernau/grh-lean](https://github.com/lsernau/grh-lean). This rewriting of Alpöge’s original proof provides a [reading guide](https://github.com/lsernau/grh-lean/blob/72fead102f663d5c7a407964a13dc0cf9d977207/grh/GUIDE.md) and a [compact edition](https://github.com/lsernau/grh-lean/tree/72fead102f663d5c7a407964a13dc0cf9d977207/grh-compact). This repository provides reproducible builds and public replay records for the original release.
+The current primary repository for the community-maintained Lean proof is [leanprover-community/riemann-hypothesis](https://github.com/leanprover-community/riemann-hypothesis). This repository remains the reproducible replay archive for Alpöge’s original release.
 
 Levent Alpöge proved the Riemann hypothesis in Lean. His library also contains results on zeros of Dirichlet L-functions. **The Omega Institute builds and distributes that source in reusable pieces so others can check it on their own machines.** Deicyde mirrored the original archive and supplied the independent Comparator challenge. The proof declarations are in `src/Main.lean`. [Author’s announcement](https://alpo.ge/remark.pdf) · [Upstream verification project](https://github.com/Deicyde/riemann-hypothesis) · [Main.lean](src/Main.lean)
 
